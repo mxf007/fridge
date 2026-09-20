@@ -1,0 +1,12 @@
+{
+  "id": 6,
+  "title": "弹回会变多",
+  "teach": "混叠加深，仍可靠换格过",
+  "trays": [{ "cap": 4 }, { "cap": 4 }],
+  "bags": [
+    ["veg", "milk", "veg", "milk"],
+    ["milk", "veg", "milk", "veg"]
+  ],
+  "buffer": 3,
+  "loseable": false
+}

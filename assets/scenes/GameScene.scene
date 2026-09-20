@@ -1051,6 +1051,9 @@
     "iconUndo": {
       "__uuid__": "73fbe16c-3f5c-4230-854b-1948ab7cf28f@f9941"
     },
+    "iconHint": {
+      "__uuid__": "9be83f96-829c-4c60-9e25-590aa93e4e46@f9941"
+    },
     "_id": "gameControllerComp00001"
   },
   {

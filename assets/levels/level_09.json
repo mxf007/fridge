@@ -1,0 +1,12 @@
+{
+  "id": 9,
+  "title": "格子变小了",
+  "teach": "小格两件就封，仍靠换格过",
+  "trays": [{ "cap": 2 }, { "cap": 2 }, { "cap": 2 }, { "cap": 2 }],
+  "bags": [
+    ["veg", "milk", "veg", "milk"],
+    ["milk", "veg", "milk", "veg"]
+  ],
+  "buffer": 3,
+  "loseable": false
+}

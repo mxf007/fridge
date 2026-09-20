@@ -1,0 +1,12 @@
+{
+  "id": 7,
+  "title": "点另一格再放",
+  "teach": "种类不对会弹回，去点另一个冰箱格",
+  "trays": [{ "cap": 3 }, { "cap": 3 }],
+  "bags": [
+    ["veg", "veg", "milk"],
+    ["milk", "milk", "veg"]
+  ],
+  "buffer": 3,
+  "loseable": false
+}

@@ -1,0 +1,13 @@
+{
+  "id": 8,
+  "title": "三种也要换格",
+  "teach": "每列两种混叠，种类不对就换格",
+  "trays": [{ "cap": 3 }, { "cap": 3 }, { "cap": 3 }],
+  "bags": [
+    ["veg", "milk", "milk"],
+    ["fruit", "veg", "veg"],
+    ["milk", "fruit", "fruit"]
+  ],
+  "buffer": 3,
+  "loseable": false
+}

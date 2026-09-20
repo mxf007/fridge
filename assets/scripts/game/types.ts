@@ -49,9 +49,16 @@ export type PlaceFail = {
     reason: PlaceReason;
     item: FoodId;
     hintTrays: number[];
+    hintBuffers: number[];
 };
 
 export type PlaceResult = PlaceOk | PlaceFail;
+
+export type HintPick = {
+    dest: Dest;
+    bagCol?: number;
+    bufferIndex?: number;
+};
 
 export function isFoodId(value: string): value is FoodId {
     return (FOOD_IDS as string[]).indexOf(value) >= 0;

@@ -1,0 +1,13 @@
+{
+  "id": 10,
+  "title": "先放到柜台",
+  "teach": "这格暂时不能收时，可以点下面的空盘放下",
+  "trays": [{ "cap": 3 }, { "cap": 3 }, { "cap": 3 }],
+  "bags": [
+    ["fruit", "fruit", "fruit"],
+    ["veg", "veg", "milk"],
+    ["veg", "milk", "milk"]
+  ],
+  "buffer": 3,
+  "loseable": false
+}

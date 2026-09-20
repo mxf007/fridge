@@ -2,6 +2,7 @@ import type {
     Dest,
     FailReason,
     FoodId,
+    HintPick,
     LevelDef,
     PlaceReason,
     PlaceResult,
@@ -70,6 +71,7 @@ export class BoardState {
         const result = this.tryPlace(item, 'bag');
         if (result.ok) {
             this.bags[col].pop();
+            this.retargetIfNeeded();
         }
         return result;
     }
@@ -85,6 +87,7 @@ export class BoardState {
         const result = this.tryPlace(item, 'buffer');
         if (result.ok) {
             this.buffer[index] = null;
+            this.retargetIfNeeded();
         }
         return result;
     }
@@ -113,6 +116,43 @@ export class BoardState {
             return 'buffer_full';
         }
         return 'locked_out';
+    }
+
+    findHint(): HintPick | null {
+        const dests = this.allSelectableDests();
+        const cands: { dest: Dest; bagCol?: number; bufferIndex?: number; score: number }[] = [];
+        for (let d = 0; d < dests.length; d++) {
+            for (let c = 0; c < this.bags.length; c++) {
+                const item = this.peekBag(c);
+                if (!item) continue;
+                if (!this.canAccept(dests[d], item, 'bag').ok) continue;
+                let score = 0;
+                if (dests[d].kind === 'tray' && this.trays[dests[d].index].kind === item) score += 20;
+                if (this.dest && dests[d].kind === this.dest.kind && dests[d].index === this.dest.index) {
+                    score += 5;
+                }
+                cands.push({ dest: dests[d], bagCol: c, score });
+            }
+            if (!this.bufferEnabled || dests[d].kind === 'buffer') continue;
+            for (let i = 0; i < this.buffer.length; i++) {
+                const item = this.buffer[i];
+                if (item == null) continue;
+                if (!this.canAccept(dests[d], item, 'buffer').ok) continue;
+                let score = 10;
+                if (this.trays[dests[d].index].kind === item) score += 20;
+                cands.push({ dest: dests[d], bufferIndex: i, score });
+            }
+        }
+        if (cands.length === 0) return null;
+        cands.sort((a, b) => {
+            if (b.score !== a.score) return b.score - a.score;
+            if (a.dest.index !== b.dest.index) return a.dest.index - b.dest.index;
+            const ac = a.bagCol != null ? a.bagCol : 99;
+            const bc = b.bagCol != null ? b.bagCol : 99;
+            return ac - bc;
+        });
+        const top = cands[0];
+        return { dest: top.dest, bagCol: top.bagCol, bufferIndex: top.bufferIndex };
     }
 
     hasLegalMove(): boolean {
@@ -172,12 +212,11 @@ export class BoardState {
             this.buffer[dest.index] = item;
         }
         this.steps += 1;
-        this.retargetIfNeeded();
         return { ok: true, item, dest, sealed, steps: this.steps };
     }
 
     private fail(reason: PlaceReason, item: FoodId): PlaceResult {
-        return { ok: false, reason, item, hintTrays: this.hintTrays(reason, item) };
+        return { ok: false, reason, item, hintTrays: this.hintTrays(reason, item), hintBuffers: this.hintBuffers(reason, item) };
     }
 
     private hintTrays(reason: PlaceReason, item: FoodId): number[] {
@@ -195,6 +234,16 @@ export class BoardState {
         return [];
     }
 
+    private hintBuffers(reason: PlaceReason, item: FoodId): number[] {
+        if (!this.bufferEnabled) return [];
+        if (reason !== 'wrong_kind' && reason !== 'anti_split') return [];
+        const hits: number[] = [];
+        for (let i = 0; i < this.buffer.length; i++) {
+            if (this.canAccept({ kind: 'buffer', index: i }, item, 'bag').ok) hits.push(i);
+        }
+        return hits;
+    }
+
     private hasUnfilledKind(item: FoodId, exceptIndex: number): boolean {
         for (let i = 0; i < this.trays.length; i++) {
             if (i === exceptIndex) continue;
@@ -205,13 +254,19 @@ export class BoardState {
     }
 
     private retargetIfNeeded(): void {
-        if (this.dest && this.isDestOpen(this.dest)) return;
+        if (this.dest && this.isDestOpen(this.dest)) {
+            if (this.dest.kind === 'buffer' && !this.hasBagItems()) {
+                const tray = this.leftmostReceivableTrayDest();
+                this.dest = tray;
+            }
+            return;
+        }
         const tray = this.leftmostReceivableTrayDest();
         if (tray) {
             this.dest = tray;
             return;
         }
-        if (this.bufferEnabled) {
+        if (this.bufferEnabled && this.hasBagItems()) {
             for (let i = 0; i < this.buffer.length; i++) {
                 if (this.buffer[i] == null) {
                     this.dest = { kind: 'buffer', index: i };
@@ -220,6 +275,13 @@ export class BoardState {
             }
         }
         this.dest = null;
+    }
+
+    private hasBagItems(): boolean {
+        for (let i = 0; i < this.bags.length; i++) {
+            if (this.bags[i].length > 0) return true;
+        }
+        return false;
     }
 
     private isDestOpen(dest: Dest): boolean {

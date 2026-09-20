@@ -59,19 +59,6 @@ const SAGE = new Color(122, 158, 126, 255);
 const Y_TRAY = 250;
 const Y_BAG = -220;
 const Y_BUFFER = -524;
-const FRIDGE_PAD_X = 44;
-const FRIDGE_PAD_Y = 34;
-const FRIDGE_GAP = 18;
-const FRIDGE_MIN_W = 520;
-const FRIDGE_MAX_W = 660;
-const FRIDGE_LIGHT_H = 20;
-const FRIDGE_BASE_H = 26;
-const FRIDGE_INNER_PAD = 8;
-const FRIDGE_BEVEL = 10;
-const FRIDGE_SHELL = new Color(176, 198, 212, 255);
-const FRIDGE_FACE = new Color(208, 222, 232, 255);
-const FRIDGE_WINDOW = new Color(154, 178, 194, 255);
-const FRIDGE_OUTLINE = new Color(126, 152, 170, 255);
 /** buffer_board.png 720×220 上三格奶油盘：中心与外框（相对木板中心，Y 向上）。 */
 const BUF_BOARD_W = 720;
 const BUF_BOARD_H = 220;
@@ -528,134 +515,19 @@ export class GameController extends Component {
         return Y_TRAY;
     }
 
-    private maxTrayCap(board: BoardState): number {
-        let max = board.trays.length > 0 ? board.trays[0].cap : 4;
-        for (let i = 1; i < board.trays.length; i++) {
-            if (board.trays[i].cap > max) max = board.trays[i].cap;
-        }
-        return max;
-    }
-
     private trayMetrics(cap: number) {
         const n = this.board ? this.board.trays.length : 2;
         const mixed = !!(this.board && this.board.trays.some((t) => t.cap !== this.board!.trays[0].cap));
         let scale = cap >= 4 ? 1.15 : cap <= 2 ? 0.85 : 1;
         if (mixed) scale = cap >= 4 ? 1.05 : cap <= 2 ? 0.72 : 0.9;
         else if (n >= 4 && cap >= 3) scale = Math.min(scale, 0.88);
-
-        // 还原：用资源 `tray_empty.png`（200×280）作为格子底
-        const outerW = 200 * scale;
-        const outerH = 280 * scale;
-        const frame = 24 * scale;
-        const slotW = outerW - frame * 2;
-        const slotH = outerH - frame * 2;
-        return { slotW, slotH, frame, outerW, outerH, cap };
+        const slotW = 140 * scale;
+        const slotH = 340 * scale;
+        const frame = 18 * scale;
+        return { slotW, slotH, frame, outerW: slotW + frame * 2, outerH: slotH + frame * 2, cap };
     }
 
-    /** Step 1：更松更厚的灰蓝壳体；隔断归壳体，不做每槽胡桃外圈。 */
-    private drawFridgeFrame(
-        root: Node,
-        bodyW: number,
-        bodyH: number,
-        slotH: number,
-        xs: number[],
-    ) {
-        const body = new Node('FridgeBody');
-        body.layer = UI_2D;
-        body.setPosition(0, this.trayY(), 0);
-        body.addComponent(UITransform).setContentSize(bodyW, bodyH);
-        const g = body.addComponent(Graphics);
-        const hw = bodyW / 2;
-        const hh = bodyH / 2;
-
-        // 轻影：把冰箱“压”在墙面前
-        g.fillColor = new Color(90, 114, 130, 36);
-        g.roundRect(-hw + 14, -hh - 12, bodyW - 28, 26, 12);
-        g.fill();
-
-        g.fillColor = FRIDGE_SHELL;
-        g.roundRect(-hw, -hh, bodyW, bodyH, 48);
-        g.fill();
-
-        // 壳体顶高光 + 底阴影（柔和，不要霓虹）
-        g.fillColor = new Color(244, 250, 252, 72);
-        g.roundRect(-hw + 18, hh - 48, bodyW - 36, 22, 12);
-        g.fill();
-        g.fillColor = new Color(90, 114, 130, 26);
-        g.roundRect(-hw + 20, -hh + 18, bodyW - 40, 20, 12);
-        g.fill();
-
-        g.fillColor = FRIDGE_FACE;
-        g.roundRect(-hw + 10, -hh + 12, bodyW - 20, bodyH - 26, 40);
-        g.fill();
-
-        // 面板内沿高光，增加“内凹”
-        g.lineWidth = 2;
-        g.strokeColor = new Color(244, 250, 252, 120);
-        g.roundRect(-hw + 14, -hh + 16, bodyW - 28, bodyH - 34, 34);
-        g.stroke();
-        g.strokeColor = new Color(90, 114, 130, 22);
-        g.roundRect(-hw + 12, -hh + 14, bodyW - 24, bodyH - 30, 36);
-        g.stroke();
-
-        // 内窗底（挖进去的洞感）
-        g.fillColor = FRIDGE_WINDOW;
-        g.roundRect(
-            -hw + FRIDGE_PAD_X - 4,
-            -hh + FRIDGE_PAD_Y - 4,
-            bodyW - FRIDGE_PAD_X * 2 + 8,
-            bodyH - FRIDGE_PAD_Y * 2 + 8,
-            26,
-        );
-        g.fill();
-
-        // 内窗外沿倒角（让内窗像“挖出来”）
-        g.lineWidth = 3;
-        g.strokeColor = new Color(244, 250, 252, 90);
-        g.roundRect(
-            -hw + FRIDGE_PAD_X - 2,
-            -hh + FRIDGE_PAD_Y - 2,
-            bodyW - FRIDGE_PAD_X * 2 + 4,
-            bodyH - FRIDGE_PAD_Y * 2 + 4,
-            24,
-        );
-        g.stroke();
-        g.lineWidth = 2;
-        g.strokeColor = new Color(90, 114, 130, 40);
-        g.roundRect(
-            -hw + FRIDGE_PAD_X + 2,
-            -hh + FRIDGE_PAD_Y + 2,
-            bodyW - FRIDGE_PAD_X * 2 - 4,
-            bodyH - FRIDGE_PAD_Y * 2 - 4,
-            22,
-        );
-        g.stroke();
-
-        // 隔断：来自壳体本身（不再把每槽都画胡桃框）
-        const divH = slotH + 10;
-        for (let i = 0; i < xs.length - 1; i++) {
-            const mid = (xs[i] + xs[i + 1]) / 2;
-            g.fillColor = FRIDGE_SHELL;
-            g.roundRect(mid - FRIDGE_GAP / 2, -divH / 2, FRIDGE_GAP, divH, 10);
-            g.fill();
-            // 一点点冷白高光，别做成霓虹
-            g.fillColor = new Color(244, 250, 252, 90);
-            g.roundRect(mid - 2, -divH / 2 + 14, 4, divH - 28, 2);
-            g.fill();
-        }
-
-        g.lineWidth = 4;
-        g.strokeColor = FRIDGE_OUTLINE;
-        g.roundRect(-hw + 2, -hh + 2, bodyW - 4, bodyH - 4, 46);
-        g.stroke();
-        g.lineWidth = 2;
-        g.strokeColor = new Color(244, 250, 252, 160);
-        g.roundRect(-hw + 10, -hh + 10, bodyW - 20, bodyH - 20, 38);
-        g.stroke();
-
-        root.addChild(body);
-    }
-
+    /** a832 版格子：胡桃/木色外框 + 冷光内腔；收满灰门合上（含关门动画）。 */
     private drawTrays(root: Node, board: BoardState) {
         const n = board.trays.length;
         const gap = n >= 4 ? 12 : 24;
@@ -663,13 +535,11 @@ export class GameController extends Component {
         let total = gap * Math.max(n - 1, 0);
         for (let i = 0; i < n; i++) total += metrics[i].outerW;
         let cursor = -total / 2;
-
         for (let i = 0; i < n; i++) {
             const tray = board.trays[i];
             const m = metrics[i];
             const x = cursor + m.outerW / 2;
             cursor += m.outerW + gap;
-
             const node = new Node(`Tray${i}`);
             node.layer = UI_2D;
             node.setPosition(x, this.trayY(), 0);
@@ -679,35 +549,42 @@ export class GameController extends Component {
             const selected = !!(board.dest && board.dest.kind === 'tray' && board.dest.index === i && !tray.sealed);
             const closing = this.animateDoorIndex === i;
             const closed = tray.sealed && !closing;
-
-            // 回滚：格子使用资源图（`tray_empty` / `tray_sealed`）
-            this.addSprite(
-                node,
-                'TrayBg',
-                closed ? this.traySealed : this.trayEmpty,
-                m.outerW,
-                m.outerH,
-                0,
-                0,
-                Color.WHITE,
-            );
-
-            // 选中态：资源外沿 Walnut 描边
-            if (selected && !closed) {
-                const ring = new Node('Select');
-                ring.layer = UI_2D;
-                ring.addComponent(UITransform).setContentSize(m.outerW, m.outerH);
-                const g = ring.addComponent(Graphics);
-                g.lineWidth = 3;
-                g.strokeColor = WALNUT;
-                g.roundRect(-m.outerW / 2 + 2, -m.outerH / 2 + 2, m.outerW - 4, m.outerH - 4, 26);
+            const gNode = new Node('Cell');
+            gNode.layer = UI_2D;
+            gNode.addComponent(UITransform).setContentSize(m.outerW, m.outerH);
+            const g = gNode.addComponent(Graphics);
+            g.fillColor = selected ? WALNUT : FRAME;
+            g.roundRect(-m.outerW / 2, -m.outerH / 2, m.outerW, m.outerH, 28);
+            g.fill();
+            if (selected) {
+                g.lineWidth = 8;
+                g.strokeColor = CORAL;
+                g.roundRect(-m.outerW / 2 + 4, -m.outerH / 2 + 4, m.outerW - 8, m.outerH - 8, 24);
                 g.stroke();
-                node.addChild(ring);
             }
+            if (closed) {
+                this.paintDoor(g, m.slotW, m.slotH);
+            } else {
+                g.fillColor = selected ? new Color(245, 252, 255, 255) : new Color(198, 210, 214, 255);
+                g.roundRect(-m.slotW / 2, -m.slotH / 2, m.slotW, m.slotH, 20);
+                g.fill();
+                g.fillColor = selected ? new Color(255, 255, 255, 200) : new Color(255, 255, 255, 70);
+                g.circle(0, m.slotH / 2 - 28, selected ? 28 : 18);
+                g.fill();
+            }
+            node.addChild(gNode);
+            if (selected && !closed) node.setScale(1.06, 1.06, 1);
+            if (selected && !closed && n > 1) this.drawDestBadge(node, m.outerH);
 
             if (!closed) {
                 if (this.mixedCaps()) this.drawCapacityLayers(node, m, tray.cap, tray.items.length);
                 this.drawFoodsInTray(node, tray.items, m.slotH, tray.cap);
+            }
+
+            if (closing && tray.sealed) {
+                const door = this.makeDoorNode(m.slotW, m.slotH);
+                door.setScale(0.06, 1, 1);
+                node.addChild(door);
             }
 
             if (!selected && !closed && this.holdHintTrays.indexOf(i) >= 0) {
@@ -814,10 +691,12 @@ export class GameController extends Component {
     }
 
     private foodSlotY(slotH: number, cap: number, index: number): number {
-        // Step 2：给槽内留出“顶灯/底托”，食材坐在底托上，不再漂
-        const bottomPad = FRIDGE_BASE_H + FRIDGE_INNER_PAD + 10;
-        // 参考图是“从底托往上叠”，不做等分拉伸
-        return -slotH / 2 + bottomPad + TRAY_FOOD_H / 2 + index * (TRAY_FOOD_H + TRAY_FOOD_GAP);
+        if (this.mixedCaps() && cap > 0) {
+            const pad = 18;
+            const step = (slotH - pad * 2) / cap;
+            return -slotH / 2 + pad + step * (index + 0.5);
+        }
+        return -slotH / 2 + 20 + TRAY_FOOD_H / 2 + index * (TRAY_FOOD_H + TRAY_FOOD_GAP);
     }
 
     private drawCapacityLayers(
@@ -830,21 +709,23 @@ export class GameController extends Component {
         layers.layer = UI_2D;
         layers.addComponent(UITransform).setContentSize(m.slotW, m.slotH);
         const g = layers.addComponent(Graphics);
-        const h = TRAY_FOOD_H + 6;
-        const w = m.slotW - 22;
+        const pad = 18;
+        const step = (m.slotH - pad * 2) / cap;
+        const h = Math.max(step - 8, 22);
+        const w = m.slotW * 0.7;
         for (let i = 0; i < cap; i++) {
             const y = this.foodSlotY(m.slotH, cap, i);
             if (i < filled) {
-                g.fillColor = new Color(255, 255, 255, 10);
-                g.roundRect(-w / 2, y - h / 2, w, h, 8);
+                g.fillColor = new Color(255, 255, 255, 16);
+                g.roundRect(-w / 2, y - h / 2, w, h, 10);
                 g.fill();
             } else {
-                g.fillColor = new Color(248, 252, 255, 36);
-                g.roundRect(-w / 2, y - h / 2, w, h, 8);
+                g.fillColor = new Color(255, 253, 248, 42);
+                g.roundRect(-w / 2, y - h / 2, w, h, 10);
                 g.fill();
-                g.strokeColor = new Color(255, 255, 255, 90);
-                g.lineWidth = 1.5;
-                g.roundRect(-w / 2, y - h / 2, w, h, 8);
+                g.strokeColor = new Color(255, 253, 248, 170);
+                g.lineWidth = 2;
+                g.roundRect(-w / 2, y - h / 2, w, h, 10);
                 g.stroke();
             }
         }

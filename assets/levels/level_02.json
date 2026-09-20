@@ -1,0 +1,12 @@
+{
+  "id": 2,
+  "title": "左奶右菜",
+  "teach": "两种，仍是单色列",
+  "trays": [{ "cap": 3 }, { "cap": 3 }],
+  "bags": [
+    ["milk", "milk", "milk"],
+    ["veg", "veg", "veg"]
+  ],
+  "buffer": 3,
+  "loseable": false
+}

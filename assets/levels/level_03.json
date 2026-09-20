@@ -1,0 +1,9 @@
+{
+  "id": 3,
+  "title": "先菜后奶",
+  "teach": "一列里会混色",
+  "trays": [{ "cap": 3 }, { "cap": 3 }],
+  "bags": [["milk", "milk", "milk", "veg", "veg", "veg"]],
+  "buffer": 3,
+  "loseable": false
+}

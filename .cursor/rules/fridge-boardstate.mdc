@@ -1,0 +1,24 @@
+---
+description: BoardState 必须纯数据，规则与 Cocos 节点分开。
+globs: assets/scripts/**/*.ts
+alwaysApply: false
+---
+
+# BoardState
+
+逻辑放 `assets/scripts/game/`（或同级纯 TS），**零引用 `cc.`**。场景脚本只读状态、播动画、把点击翻译成 `selectTray` / `place`。
+
+```ts
+// ❌ 点食材后遍历格子自动放入
+place(item) { const t = this.findFitTray(item); this.put(t, item); }
+
+// ✅ 只进入当前目标；不合法则返回原因
+place(item) { return this.canAccept(this.dest, item) ? this.put() : { ok: false, reason }; }
+```
+
+- 落子成功才 `steps++`。换目标不是一步。
+- 冰箱可收：已锁同类且未满；或空格且场上没有「同种未满格」（防拆分）。
+- `reason` 必须是 `wrong_kind | anti_split | no_target | dest_full` 之一，UI 按玩法 2.4 分因 Toast + 闪合法格。
+- `failReason` 只能是 `buffer_full | locked_out`。禁止锁死盘面只加一格柜台。
+- 撤销先做「撤上一次成功落子」。提示：模拟一步后 `hasSolution` 仍为真才高亮；第 7 关第一次免费。
+- 关卡是 `LevelDef` JSON。求解器搜「选目标 × 可点食材」，`id < 10` 目标不含柜台。

@@ -1,0 +1,13 @@
+{
+  "id": 5,
+  "title": "水果也要收",
+  "teach": "第三种：水果",
+  "trays": [{ "cap": 3 }, { "cap": 3 }, { "cap": 3 }],
+  "bags": [
+    ["milk", "milk", "milk"],
+    ["veg", "veg", "veg"],
+    ["fruit", "fruit", "fruit"]
+  ],
+  "buffer": 3,
+  "loseable": false
+}

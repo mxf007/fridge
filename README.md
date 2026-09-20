@@ -8,6 +8,6 @@
 1. 打开 **Cocos Dashboard**，确认已安装编辑器 **3.8.3**。
 2. 添加项目，路径选 `F:\fridge`。
 3. 用 3.8.3 打开。第一次打开会生成 `library/`、`temp/`。
-4. 在 `assets/scenes` 新建场景 `GameScene`，挂 Canvas（设计分辨率 720×1280），设为初始场景后再点预览。
+4. 用 3.8.3 打开后会导入 `assets/scenes/GameScene.scene`（Canvas 720×1280，奶油底）。已设为当前场景；点预览应是竖屏空画布。
 
 不要用 `blue_bean` 的场景或脚本。这是独立工程。

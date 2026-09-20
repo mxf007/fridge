@@ -1,0 +1,12 @@
+{
+  "id": 4,
+  "title": "格没满也会换色",
+  "teach": "种类不对会弹回，先点另一个格子",
+  "trays": [{ "cap": 4 }, { "cap": 4 }],
+  "bags": [
+    ["veg", "veg", "veg", "milk"],
+    ["milk", "milk", "milk", "veg"]
+  ],
+  "buffer": 3,
+  "loseable": false
+}

@@ -1,6 +1,6 @@
 /**
  * 对局视图：把点击译成 selectTray / placeFromBag。不写规则。
- * 第 1 关对照 03_play_l1：竖槽 + 牛奶盒列。飞入 220ms，封格关门 280ms，胜利再延迟。
+ * 第 1 关：竖槽 + 牛奶托盘列。飞入 220ms，封格关门 280ms，胜利再延迟。
  */
 import {
     _decorator,
@@ -39,6 +39,7 @@ import { LEVEL_14, selfCheckLevel14 } from './game/level_14';
 import { LEVEL_15, selfCheckLevel15 } from './game/level_15';
 import { LEVEL_16, selfCheckLevel16 } from './game/level_16';
 import { LEVEL_17, selfCheckLevel17 } from './game/level_17';
+import { LEVEL_18, selfCheckLevel18 } from './game/level_18';
 import type { Dest, FailReason, FoodId, HintPick, LevelDef, PlaceFail, PlaceReason } from './game/types';
 import { FOOD_NAMES } from './game/types';
 
@@ -58,10 +59,28 @@ const SAGE = new Color(122, 158, 126, 255);
 const Y_TRAY = 250;
 const Y_BAG = -220;
 const Y_BUFFER = -524;
-const BUF_SLOT = 148;
-const CARTON_W = 108;
-const CARTON_H = 177;
-const CARTON_OVERLAP = 78;
+const FRIDGE_PAD_X = 44;
+const FRIDGE_PAD_Y = 34;
+const FRIDGE_GAP = 18;
+const FRIDGE_MIN_W = 520;
+const FRIDGE_MAX_W = 660;
+const FRIDGE_LIGHT_H = 20;
+const FRIDGE_BASE_H = 26;
+const FRIDGE_INNER_PAD = 8;
+const FRIDGE_BEVEL = 10;
+const FRIDGE_SHELL = new Color(176, 198, 212, 255);
+const FRIDGE_FACE = new Color(208, 222, 232, 255);
+const FRIDGE_WINDOW = new Color(154, 178, 194, 255);
+const FRIDGE_OUTLINE = new Color(126, 152, 170, 255);
+/** buffer_board.png 720×220 上三格奶油盘：中心与外框（相对木板中心，Y 向上）。 */
+const BUF_BOARD_W = 720;
+const BUF_BOARD_H = 220;
+const BUF_SLOT_W = 168;
+const BUF_SLOT_H = 140;
+const BUF_WELL_Y = 16;
+const BUF_WELL_XS = [-198, 0, 194];
+const BAG_TILE = 112;
+const BAG_STEP = 30;
 const TRAY_FOOD_W = 50.4;
 const TRAY_FOOD_H = 76.8;
 const TRAY_FOOD_GAP = 4;
@@ -76,13 +95,35 @@ const UUID = {
     foodFruit: '87f8396a-b237-44ee-bfcf-6856a22a2794@f9941',
     foodMeat: '948637a0-ae61-4105-bbf7-ddf5988257e2@f9941',
     foodSauce: 'cc9a1cd4-86d6-4590-bf78-e264c01e8c06@f9941',
+    foodGrape: '7c4e1a90-2b3d-4f5a-9c8e-1d2f3a4b5c6d@f9941',
+    foodLemon: '8d5f2b01-3c4e-406b-ad9f-2e3a4b5c6d7e@f9941',
+    foodKiwi: '9e603c12-4d5f-417c-bea0-3f4b5c6d7e8f@f9941',
+    foodPineapple: 'af714d23-5e60-428d-cfb1-405c6d7e8f90@f9941',
+    foodWatermelon: 'c1936f45-7082-44af-e1d3-627e8f901a2b@f9941',
+    foodCoconut: 'b0825e34-6f71-439e-d0c2-516d7e8f901a@f9941',
+    bagMilk: '30f16d44-c58b-40f0-9961-0e4af9e14c0a@f9941',
+    bagVeg: 'f56ca46f-d09a-4eef-8c54-72aba7419d20@f9941',
+    bagFruit: '6a76c6c7-4158-4329-8308-d37cb626a369@f9941',
+    bagMeat: 'e2939c8d-697b-4a6f-84a0-d211a0d6b7f5@f9941',
+    bagSauce: '09a0cb31-3c5e-4692-8143-ebc38a645aea@f9941',
+    bagLeftover: '19169ab7-29dd-4620-8fb3-4a2f4fa4e349@f9941',
+    bagGrape: '3c8e1f70-9a24-4d5b-b6c1-8e2f0a4d7b19@f9941',
+    bagLemon: '4d9f2081-ab35-4e6c-87d2-9f3a1b5e8c20@f9941',
+    bagKiwi: '5e0a3192-bc46-4f7d-98e3-a04b2c6f9d31@f9941',
+    bagPineapple: '6f1b42a3-cd57-408e-a9f4-b15c3d70ae42@f9941',
+    bagWatermelon: '701c53b4-de68-419f-8a05-c26d4e81bf53@f9941',
+    bagCoconut: '812d64c5-ef79-42a0-8b16-d37e5f92c064@f9941',
+    bgPlay: 'b4d8e2a0-6c19-4f3b-91d7-5e8a0c2f4b63@f9941',
+    bufferBoard: 'a41d431c-862d-48e8-9b57-b2cb36108f8e@f9941',
+    trayEmpty: '6f229be7-9378-4d91-a617-1d2d45218e74@f9941',
+    traySealed: '8085b3c5-21f0-4bcc-b990-c97f4c899dca@f9941',
     iconUndo: '73fbe16c-3f5c-4230-854b-1948ab7cf28f@f9941',
     iconHint: '9be83f96-829c-4c60-9e25-590aa93e4e46@f9941',
     builtin: '20835ba4-6145-4fbc-a58a-051ce700aa3e@f9941',
 };
 
 const HOME_NODES = ['Bg', 'Title', 'BtnStart', 'AlbumLink', 'HomeBarMask'];
-const PLAYABLE: LevelDef[] = [LEVEL_01, LEVEL_02, LEVEL_03, LEVEL_04, LEVEL_05, LEVEL_06, LEVEL_07, LEVEL_08, LEVEL_09, LEVEL_10, LEVEL_11, LEVEL_12, LEVEL_13, LEVEL_14, LEVEL_15, LEVEL_16, LEVEL_17];
+const PLAYABLE: LevelDef[] = [LEVEL_01, LEVEL_02, LEVEL_03, LEVEL_04, LEVEL_05, LEVEL_06, LEVEL_07, LEVEL_08, LEVEL_09, LEVEL_10, LEVEL_11, LEVEL_12, LEVEL_13, LEVEL_14, LEVEL_15, LEVEL_16, LEVEL_17, LEVEL_18];
 const CLEARED_KEY = 'fridge_cleared';
 
 const TOAST: Record<PlaceReason, string> = {
@@ -110,6 +151,24 @@ export class GameController extends Component {
     foodSauce: SpriteFrame | null = null;
 
     @property({ type: SpriteFrame })
+    foodGrape: SpriteFrame | null = null;
+
+    @property({ type: SpriteFrame })
+    foodLemon: SpriteFrame | null = null;
+
+    @property({ type: SpriteFrame })
+    foodKiwi: SpriteFrame | null = null;
+
+    @property({ type: SpriteFrame })
+    foodPineapple: SpriteFrame | null = null;
+
+    @property({ type: SpriteFrame })
+    foodWatermelon: SpriteFrame | null = null;
+
+    @property({ type: SpriteFrame })
+    foodCoconut: SpriteFrame | null = null;
+
+    @property({ type: SpriteFrame })
     iconUndo: SpriteFrame | null = null;
 
     @property({ type: SpriteFrame })
@@ -118,6 +177,11 @@ export class GameController extends Component {
     private board: BoardState | null = null;
     private playRoot: Node | null = null;
     private builtin: SpriteFrame | null = null;
+    private bgPlay: SpriteFrame | null = null;
+    private bufferBoard: SpriteFrame | null = null;
+    private trayEmpty: SpriteFrame | null = null;
+    private traySealed: SpriteFrame | null = null;
+    private bagFrames: Partial<Record<FoodId, SpriteFrame>> = {};
     private busy = false;
     private animateDoorIndex: number | null = null;
     private holdWin = false;
@@ -148,6 +212,7 @@ export class GameController extends Component {
         selfCheckLevel15();
         selfCheckLevel16();
         selfCheckLevel17();
+        selfCheckLevel18();
         this.bindHome();
         void this.ensureFrames();
     }
@@ -165,8 +230,36 @@ export class GameController extends Component {
         if (!this.foodFruit) this.foodFruit = await loadFrame(UUID.foodFruit);
         if (!this.foodMeat) this.foodMeat = await loadFrame(UUID.foodMeat);
         if (!this.foodSauce) this.foodSauce = await loadFrame(UUID.foodSauce);
+        if (!this.foodGrape) this.foodGrape = await loadFrame(UUID.foodGrape);
+        if (!this.foodLemon) this.foodLemon = await loadFrame(UUID.foodLemon);
+        if (!this.foodKiwi) this.foodKiwi = await loadFrame(UUID.foodKiwi);
+        if (!this.foodPineapple) this.foodPineapple = await loadFrame(UUID.foodPineapple);
+        if (!this.foodWatermelon) this.foodWatermelon = await loadFrame(UUID.foodWatermelon);
+        if (!this.foodCoconut) this.foodCoconut = await loadFrame(UUID.foodCoconut);
+        const bagIds: [FoodId, string][] = [
+            ['milk', UUID.bagMilk],
+            ['veg', UUID.bagVeg],
+            ['fruit', UUID.bagFruit],
+            ['meat', UUID.bagMeat],
+            ['sauce', UUID.bagSauce],
+            ['leftover', UUID.bagLeftover],
+            ['grape', UUID.bagGrape],
+            ['lemon', UUID.bagLemon],
+            ['kiwi', UUID.bagKiwi],
+            ['pineapple', UUID.bagPineapple],
+            ['watermelon', UUID.bagWatermelon],
+            ['coconut', UUID.bagCoconut],
+        ];
+        for (let i = 0; i < bagIds.length; i++) {
+            const id = bagIds[i][0];
+            if (!this.bagFrames[id]) this.bagFrames[id] = await loadFrame(bagIds[i][1]);
+        }
         if (!this.iconUndo) this.iconUndo = await loadFrame(UUID.iconUndo);
         if (!this.iconHint) this.iconHint = await loadFrame(UUID.iconHint);
+        if (!this.bgPlay) this.bgPlay = await loadFrame(UUID.bgPlay);
+        if (!this.bufferBoard) this.bufferBoard = await loadFrame(UUID.bufferBoard);
+        if (!this.trayEmpty) this.trayEmpty = await loadFrame(UUID.trayEmpty);
+        if (!this.traySealed) this.traySealed = await loadFrame(UUID.traySealed);
         this.builtin = await loadFrame(UUID.builtin);
         if (this.board) this.render();
     }
@@ -232,7 +325,7 @@ export class GameController extends Component {
         if (!root || !board) return;
         root.removeAllChildren();
 
-        this.addSprite(root, 'PlayBg', this.builtin, 720, 1280, 0, 0, CREAM);
+        this.addSprite(root, 'PlayBg', this.bgPlay || this.builtin, 720, 1280, 0, 0, this.bgPlay ? Color.WHITE : CREAM);
         this.drawHud(root);
         this.drawTrays(root, board);
         this.drawBags(root, board);
@@ -435,16 +528,132 @@ export class GameController extends Component {
         return Y_TRAY;
     }
 
+    private maxTrayCap(board: BoardState): number {
+        let max = board.trays.length > 0 ? board.trays[0].cap : 4;
+        for (let i = 1; i < board.trays.length; i++) {
+            if (board.trays[i].cap > max) max = board.trays[i].cap;
+        }
+        return max;
+    }
+
     private trayMetrics(cap: number) {
         const n = this.board ? this.board.trays.length : 2;
         const mixed = !!(this.board && this.board.trays.some((t) => t.cap !== this.board!.trays[0].cap));
         let scale = cap >= 4 ? 1.15 : cap <= 2 ? 0.85 : 1;
         if (mixed) scale = cap >= 4 ? 1.05 : cap <= 2 ? 0.72 : 0.9;
         else if (n >= 4 && cap >= 3) scale = Math.min(scale, 0.88);
-        const slotW = 140 * scale;
-        const slotH = 340 * scale;
-        const frame = 18 * scale;
-        return { slotW, slotH, frame, outerW: slotW + frame * 2, outerH: slotH + frame * 2, cap };
+
+        // 还原：用资源 `tray_empty.png`（200×280）作为格子底
+        const outerW = 200 * scale;
+        const outerH = 280 * scale;
+        const frame = 24 * scale;
+        const slotW = outerW - frame * 2;
+        const slotH = outerH - frame * 2;
+        return { slotW, slotH, frame, outerW, outerH, cap };
+    }
+
+    /** Step 1：更松更厚的灰蓝壳体；隔断归壳体，不做每槽胡桃外圈。 */
+    private drawFridgeFrame(
+        root: Node,
+        bodyW: number,
+        bodyH: number,
+        slotH: number,
+        xs: number[],
+    ) {
+        const body = new Node('FridgeBody');
+        body.layer = UI_2D;
+        body.setPosition(0, this.trayY(), 0);
+        body.addComponent(UITransform).setContentSize(bodyW, bodyH);
+        const g = body.addComponent(Graphics);
+        const hw = bodyW / 2;
+        const hh = bodyH / 2;
+
+        // 轻影：把冰箱“压”在墙面前
+        g.fillColor = new Color(90, 114, 130, 36);
+        g.roundRect(-hw + 14, -hh - 12, bodyW - 28, 26, 12);
+        g.fill();
+
+        g.fillColor = FRIDGE_SHELL;
+        g.roundRect(-hw, -hh, bodyW, bodyH, 48);
+        g.fill();
+
+        // 壳体顶高光 + 底阴影（柔和，不要霓虹）
+        g.fillColor = new Color(244, 250, 252, 72);
+        g.roundRect(-hw + 18, hh - 48, bodyW - 36, 22, 12);
+        g.fill();
+        g.fillColor = new Color(90, 114, 130, 26);
+        g.roundRect(-hw + 20, -hh + 18, bodyW - 40, 20, 12);
+        g.fill();
+
+        g.fillColor = FRIDGE_FACE;
+        g.roundRect(-hw + 10, -hh + 12, bodyW - 20, bodyH - 26, 40);
+        g.fill();
+
+        // 面板内沿高光，增加“内凹”
+        g.lineWidth = 2;
+        g.strokeColor = new Color(244, 250, 252, 120);
+        g.roundRect(-hw + 14, -hh + 16, bodyW - 28, bodyH - 34, 34);
+        g.stroke();
+        g.strokeColor = new Color(90, 114, 130, 22);
+        g.roundRect(-hw + 12, -hh + 14, bodyW - 24, bodyH - 30, 36);
+        g.stroke();
+
+        // 内窗底（挖进去的洞感）
+        g.fillColor = FRIDGE_WINDOW;
+        g.roundRect(
+            -hw + FRIDGE_PAD_X - 4,
+            -hh + FRIDGE_PAD_Y - 4,
+            bodyW - FRIDGE_PAD_X * 2 + 8,
+            bodyH - FRIDGE_PAD_Y * 2 + 8,
+            26,
+        );
+        g.fill();
+
+        // 内窗外沿倒角（让内窗像“挖出来”）
+        g.lineWidth = 3;
+        g.strokeColor = new Color(244, 250, 252, 90);
+        g.roundRect(
+            -hw + FRIDGE_PAD_X - 2,
+            -hh + FRIDGE_PAD_Y - 2,
+            bodyW - FRIDGE_PAD_X * 2 + 4,
+            bodyH - FRIDGE_PAD_Y * 2 + 4,
+            24,
+        );
+        g.stroke();
+        g.lineWidth = 2;
+        g.strokeColor = new Color(90, 114, 130, 40);
+        g.roundRect(
+            -hw + FRIDGE_PAD_X + 2,
+            -hh + FRIDGE_PAD_Y + 2,
+            bodyW - FRIDGE_PAD_X * 2 - 4,
+            bodyH - FRIDGE_PAD_Y * 2 - 4,
+            22,
+        );
+        g.stroke();
+
+        // 隔断：来自壳体本身（不再把每槽都画胡桃框）
+        const divH = slotH + 10;
+        for (let i = 0; i < xs.length - 1; i++) {
+            const mid = (xs[i] + xs[i + 1]) / 2;
+            g.fillColor = FRIDGE_SHELL;
+            g.roundRect(mid - FRIDGE_GAP / 2, -divH / 2, FRIDGE_GAP, divH, 10);
+            g.fill();
+            // 一点点冷白高光，别做成霓虹
+            g.fillColor = new Color(244, 250, 252, 90);
+            g.roundRect(mid - 2, -divH / 2 + 14, 4, divH - 28, 2);
+            g.fill();
+        }
+
+        g.lineWidth = 4;
+        g.strokeColor = FRIDGE_OUTLINE;
+        g.roundRect(-hw + 2, -hh + 2, bodyW - 4, bodyH - 4, 46);
+        g.stroke();
+        g.lineWidth = 2;
+        g.strokeColor = new Color(244, 250, 252, 160);
+        g.roundRect(-hw + 10, -hh + 10, bodyW - 20, bodyH - 20, 38);
+        g.stroke();
+
+        root.addChild(body);
     }
 
     private drawTrays(root: Node, board: BoardState) {
@@ -454,11 +663,13 @@ export class GameController extends Component {
         let total = gap * Math.max(n - 1, 0);
         for (let i = 0; i < n; i++) total += metrics[i].outerW;
         let cursor = -total / 2;
+
         for (let i = 0; i < n; i++) {
             const tray = board.trays[i];
             const m = metrics[i];
             const x = cursor + m.outerW / 2;
             cursor += m.outerW + gap;
+
             const node = new Node(`Tray${i}`);
             node.layer = UI_2D;
             node.setPosition(x, this.trayY(), 0);
@@ -468,42 +679,35 @@ export class GameController extends Component {
             const selected = !!(board.dest && board.dest.kind === 'tray' && board.dest.index === i && !tray.sealed);
             const closing = this.animateDoorIndex === i;
             const closed = tray.sealed && !closing;
-            const gNode = new Node('Cell');
-            gNode.layer = UI_2D;
-            gNode.addComponent(UITransform).setContentSize(m.outerW, m.outerH);
-            const g = gNode.addComponent(Graphics);
-            g.fillColor = selected ? WALNUT : FRAME;
-            g.roundRect(-m.outerW / 2, -m.outerH / 2, m.outerW, m.outerH, 28);
-            g.fill();
-            if (selected) {
-                g.lineWidth = 8;
-                g.strokeColor = CORAL;
-                g.roundRect(-m.outerW / 2 + 4, -m.outerH / 2 + 4, m.outerW - 8, m.outerH - 8, 24);
+
+            // 回滚：格子使用资源图（`tray_empty` / `tray_sealed`）
+            this.addSprite(
+                node,
+                'TrayBg',
+                closed ? this.traySealed : this.trayEmpty,
+                m.outerW,
+                m.outerH,
+                0,
+                0,
+                Color.WHITE,
+            );
+
+            // 选中态：资源外沿 Walnut 描边
+            if (selected && !closed) {
+                const ring = new Node('Select');
+                ring.layer = UI_2D;
+                ring.addComponent(UITransform).setContentSize(m.outerW, m.outerH);
+                const g = ring.addComponent(Graphics);
+                g.lineWidth = 3;
+                g.strokeColor = WALNUT;
+                g.roundRect(-m.outerW / 2 + 2, -m.outerH / 2 + 2, m.outerW - 4, m.outerH - 4, 26);
                 g.stroke();
+                node.addChild(ring);
             }
-            if (closed) {
-                this.paintDoor(g, m.slotW, m.slotH);
-            } else {
-                g.fillColor = selected ? new Color(245, 252, 255, 255) : new Color(198, 210, 214, 255);
-                g.roundRect(-m.slotW / 2, -m.slotH / 2, m.slotW, m.slotH, 20);
-                g.fill();
-                g.fillColor = selected ? new Color(255, 255, 255, 200) : new Color(255, 255, 255, 70);
-                g.circle(0, m.slotH / 2 - 28, selected ? 28 : 18);
-                g.fill();
-            }
-            node.addChild(gNode);
-            if (selected && !closed) node.setScale(1.06, 1.06, 1);
-            if (selected && !closed && n > 1) this.drawDestBadge(node, m.outerH);
 
             if (!closed) {
                 if (this.mixedCaps()) this.drawCapacityLayers(node, m, tray.cap, tray.items.length);
                 this.drawFoodsInTray(node, tray.items, m.slotH, tray.cap);
-            }
-
-            if (closing && tray.sealed) {
-                const door = this.makeDoorNode(m.slotW, m.slotH);
-                door.setScale(0.06, 1, 1);
-                node.addChild(door);
             }
 
             if (!selected && !closed && this.holdHintTrays.indexOf(i) >= 0) {
@@ -588,6 +792,13 @@ export class GameController extends Component {
         if (kind === 'fruit') return new Color(224, 122, 95, 255);
         if (kind === 'meat') return new Color(166, 90, 70, 255);
         if (kind === 'sauce') return new Color(180, 80, 50, 255);
+        if (kind === 'leftover') return new Color(140, 100, 160, 255);
+        if (kind === 'grape') return new Color(142, 90, 158, 255);
+        if (kind === 'lemon') return new Color(232, 196, 72, 255);
+        if (kind === 'kiwi') return new Color(140, 160, 70, 255);
+        if (kind === 'pineapple') return new Color(210, 170, 60, 255);
+        if (kind === 'watermelon') return new Color(80, 140, 90, 255);
+        if (kind === 'coconut') return new Color(150, 110, 80, 255);
         return FRAME;
     }
 
@@ -603,12 +814,10 @@ export class GameController extends Component {
     }
 
     private foodSlotY(slotH: number, cap: number, index: number): number {
-        if (this.mixedCaps() && cap > 0) {
-            const pad = 18;
-            const step = (slotH - pad * 2) / cap;
-            return -slotH / 2 + pad + step * (index + 0.5);
-        }
-        return -slotH / 2 + 20 + TRAY_FOOD_H / 2 + index * (TRAY_FOOD_H + TRAY_FOOD_GAP);
+        // Step 2：给槽内留出“顶灯/底托”，食材坐在底托上，不再漂
+        const bottomPad = FRIDGE_BASE_H + FRIDGE_INNER_PAD + 10;
+        // 参考图是“从底托往上叠”，不做等分拉伸
+        return -slotH / 2 + bottomPad + TRAY_FOOD_H / 2 + index * (TRAY_FOOD_H + TRAY_FOOD_GAP);
     }
 
     private drawCapacityLayers(
@@ -621,23 +830,21 @@ export class GameController extends Component {
         layers.layer = UI_2D;
         layers.addComponent(UITransform).setContentSize(m.slotW, m.slotH);
         const g = layers.addComponent(Graphics);
-        const pad = 18;
-        const step = (m.slotH - pad * 2) / cap;
-        const h = Math.max(step - 8, 22);
-        const w = m.slotW * 0.7;
+        const h = TRAY_FOOD_H + 6;
+        const w = m.slotW - 22;
         for (let i = 0; i < cap; i++) {
             const y = this.foodSlotY(m.slotH, cap, i);
             if (i < filled) {
-                g.fillColor = new Color(255, 255, 255, 16);
-                g.roundRect(-w / 2, y - h / 2, w, h, 10);
+                g.fillColor = new Color(255, 255, 255, 10);
+                g.roundRect(-w / 2, y - h / 2, w, h, 8);
                 g.fill();
             } else {
-                g.fillColor = new Color(255, 253, 248, 42);
-                g.roundRect(-w / 2, y - h / 2, w, h, 10);
+                g.fillColor = new Color(248, 252, 255, 36);
+                g.roundRect(-w / 2, y - h / 2, w, h, 8);
                 g.fill();
-                g.strokeColor = new Color(255, 253, 248, 170);
-                g.lineWidth = 2;
-                g.roundRect(-w / 2, y - h / 2, w, h, 10);
+                g.strokeColor = new Color(255, 255, 255, 90);
+                g.lineWidth = 1.5;
+                g.roundRect(-w / 2, y - h / 2, w, h, 8);
                 g.stroke();
             }
         }
@@ -751,7 +958,7 @@ export class GameController extends Component {
 
     private noteSizeTeach(item: FoodId, dest: Dest) {
         const board = this.board;
-        if (!board || board.level.id !== 17 || board.isWin()) {
+        if (!board || !this.mixedCaps() || board.isWin()) {
             this.sizeTeach = null;
             return;
         }
@@ -770,7 +977,7 @@ export class GameController extends Component {
 
     private prepareSizeFail(result: PlaceFail) {
         const board = this.board;
-        if (!board || board.level.id !== 17 || result.reason !== 'dest_full') return;
+        if (!board || !this.mixedCaps() || result.reason !== 'dest_full') return;
         const dest = board.dest;
         if (!dest || dest.kind !== 'tray' || board.trays[dest.index].cap > 2) return;
         this.holdCapFlash = dest.index;
@@ -944,7 +1151,7 @@ export class GameController extends Component {
         for (let c = 0; c < board.bags.length; c++) {
             if (board.bags[c].length > maxLen) maxLen = board.bags[c].length;
         }
-        const h = CARTON_H + CARTON_OVERLAP * Math.max(maxLen - 1, 0);
+        const h = BAG_TILE + BAG_STEP * Math.max(maxLen - 1, 0);
         const top = Y_BAG + h / 2;
         const limit = 48;
         return top <= limit ? Y_BAG : Y_BAG - (top - limit);
@@ -955,31 +1162,33 @@ export class GameController extends Component {
         const yBag = this.bagAnchorY(board);
         for (let c = 0; c < n; c++) {
             const col = board.bags[c];
-            const x = (c - (n - 1) / 2) * (CARTON_W + 28);
-            const h = CARTON_H + CARTON_OVERLAP * Math.max(col.length - 1, 0);
+            const x = (c - (n - 1) / 2) * (BAG_TILE + 28);
+            const h = BAG_TILE + BAG_STEP * Math.max(col.length - 1, 0);
             const colNode = new Node(`Bag${c}`);
             colNode.layer = UI_2D;
             colNode.setPosition(x, yBag, 0);
-            colNode.addComponent(UITransform).setContentSize(CARTON_W, Math.max(h, 88));
+            colNode.addComponent(UITransform).setContentSize(BAG_TILE, Math.max(h, 88));
             root.addChild(colNode);
 
             for (let i = 0; i < col.length; i++) {
                 const isTop = i === col.length - 1;
-                const y = (i - (col.length - 1) / 2) * CARTON_OVERLAP;
-                const w = isTop ? CARTON_W : CARTON_W * 0.92;
-                const ht = isTop ? CARTON_H : CARTON_H * 0.92;
-                const tint = isTop ? Color.WHITE : new Color(153, 153, 153, 255);
+                const y = (i - (col.length - 1) / 2) * BAG_STEP;
+                const tile = isTop ? BAG_TILE : BAG_TILE * 0.92;
                 if (this.mixedCaps() && isTop) this.drawGhostStack(colNode, col[i], this.unplacedKind(col[i]), y);
                 const tileNode = this.addSprite(
                     colNode,
                     `T${i}`,
-                    this.frameForFood(col[i]),
-                    w,
-                    ht,
+                    this.frameForBag(col[i]),
+                    tile,
+                    tile,
                     0,
                     y,
-                    tint,
+                    Color.WHITE,
                 );
+                if (!isTop) {
+                    const dim = tileNode.addComponent(UIOpacity);
+                    dim.opacity = 153;
+                }
                 if (isTop && this.shouldDimKind(col[i])) {
                     const dim = tileNode.addComponent(UIOpacity);
                     dim.opacity = 115;
@@ -993,37 +1202,80 @@ export class GameController extends Component {
                     this.onBagTap(c, isTop);
                 }, this);
                 if (isTop && this.holdHint && this.holdHint.bagCol === c) {
-                    this.drawSageDashedRing(tileNode, w + 12, ht + 12, 18, 'HintRing');
+                    this.drawSageDashedRing(tileNode, tile + 12, tile + 12, 18, 'HintRing');
                 }
             }
         }
     }
 
+    private bufferSlotX(index: number, count: number): number {
+        if (count === BUF_WELL_XS.length) return BUF_WELL_XS[index];
+        const span = BUF_WELL_XS[BUF_WELL_XS.length - 1] - BUF_WELL_XS[0];
+        return (index - (count - 1) / 2) * (span / Math.max(count - 1, 1));
+    }
+
+    /** 贴住奶油凹盘外沿：槽内暖光 + 珊瑚描边 + 奶色内圈。胡桃细线在木底上几乎看不见。 */
+    private drawBufferSelect(slot: Node) {
+        const w = BUF_SLOT_W;
+        const h = BUF_SLOT_H;
+        const ring = new Node('Select');
+        ring.layer = UI_2D;
+        ring.addComponent(UITransform).setContentSize(w + 28, h + 28);
+        const g = ring.addComponent(Graphics);
+        g.fillColor = new Color(255, 186, 72, 72);
+        g.roundRect(-w / 2 - 10, -h / 2 - 10, w + 20, h + 20, 36);
+        g.fill();
+        g.fillColor = new Color(255, 236, 186, 96);
+        g.roundRect(-w / 2 + 22, -h / 2 + 20, w - 44, h - 40, 22);
+        g.fill();
+        g.lineWidth = 8;
+        g.strokeColor = CORAL;
+        g.roundRect(-w / 2 - 2, -h / 2 - 2, w + 4, h + 4, 32);
+        g.stroke();
+        g.lineWidth = 3;
+        g.strokeColor = MILK;
+        g.roundRect(-w / 2 + 7, -h / 2 + 7, w - 14, h - 14, 26);
+        g.stroke();
+        slot.addChild(ring);
+        ring.setScale(0.94, 0.94, 1);
+        tween(ring)
+            .to(0.08, { scale: new Vec3(1, 1, 1) }, { easing: easing.quadOut })
+            .start();
+    }
+
     private drawBuffer(root: Node, board: BoardState) {
         if (!board.bufferEnabled) return;
         const n = board.buffer.length;
-        const gap = 20;
-        const boardW = n * BUF_SLOT + (n - 1) * gap + 48;
-        const boardH = BUF_SLOT + 56;
         const wrap = new Node('BufferBoard');
         wrap.layer = UI_2D;
         wrap.setPosition(0, Y_BUFFER, 0);
-        wrap.addComponent(UITransform).setContentSize(boardW, boardH);
-        const bg = wrap.addComponent(Graphics);
-        bg.fillColor = WALNUT;
-        bg.roundRect(-boardW / 2, -boardH / 2, boardW, boardH, 24);
-        bg.fill();
+        wrap.addComponent(UITransform).setContentSize(BUF_BOARD_W, BUF_BOARD_H);
         root.addChild(wrap);
+        this.addSprite(wrap, 'Wood', this.bufferBoard || this.builtin, BUF_BOARD_W, BUF_BOARD_H, 0, 0, Color.WHITE);
+
+        const plaqueW = 300;
+        const plaqueH = 52;
+        const plaque = new Node('BufPlaque');
+        plaque.layer = UI_2D;
+        plaque.setPosition(0, -BUF_BOARD_H / 2 - 8, 0);
+        plaque.addComponent(UITransform).setContentSize(plaqueW, plaqueH);
+        const pg = plaque.addComponent(Graphics);
+        pg.fillColor = new Color(92, 62, 48, 255);
+        pg.roundRect(-plaqueW / 2, -plaqueH / 2, plaqueW, plaqueH, 14);
+        pg.fill();
+        pg.fillColor = new Color(122, 82, 62, 255);
+        pg.roundRect(-plaqueW / 2 + 4, -plaqueH / 2 + 6, plaqueW - 8, plaqueH - 14, 10);
+        pg.fill();
+        wrap.addChild(plaque);
 
         let filled = 0;
         for (let i = 0; i < n; i++) {
             if (board.buffer[i] != null) filled += 1;
-            const x = (i - (n - 1) / 2) * (BUF_SLOT + gap);
-            const slot = new Node(`Buffer${i}`);
-            slot.layer = UI_2D;
-            slot.setPosition(x, 8, 0);
-            slot.addComponent(UITransform).setContentSize(BUF_SLOT, BUF_SLOT);
-            wrap.addChild(slot);
+            const slotNode = new Node(`Buffer${i}`);
+            slotNode.layer = UI_2D;
+            slotNode.setPosition(this.bufferSlotX(i, n), BUF_WELL_Y, 0);
+            slotNode.addComponent(UITransform).setContentSize(BUF_SLOT_W, BUF_SLOT_H);
+            wrap.addChild(slotNode);
 
             const selected = !!(
                 !board.isWin()
@@ -1031,26 +1283,16 @@ export class GameController extends Component {
                 && board.dest.kind === 'buffer'
                 && board.dest.index === i
             );
-            const g = slot.addComponent(Graphics);
-            g.fillColor = selected ? new Color(245, 252, 255, 255) : MILK;
-            g.roundRect(-BUF_SLOT / 2, -BUF_SLOT / 2, BUF_SLOT, BUF_SLOT, 18);
-            g.fill();
-            if (selected) {
-                g.lineWidth = 8;
-                g.strokeColor = CORAL;
-                g.roundRect(-BUF_SLOT / 2 + 4, -BUF_SLOT / 2 + 4, BUF_SLOT - 8, BUF_SLOT - 8, 14);
-                g.stroke();
-                this.drawDestBadge(slot, BUF_SLOT);
-            }
+            if (selected) this.drawBufferSelect(slotNode);
 
             const item = board.buffer[i];
             if (item) {
-                this.addSprite(slot, 'Food', this.frameForFood(item), 64, 96, 0, 0, Color.WHITE);
+                this.addSprite(slotNode, 'Food', this.frameForBag(item), 108, 108, 0, 0, Color.WHITE);
                 if (this.holdHint && this.holdHint.bufferIndex === i) {
-                    this.drawSageDashedRing(slot, 76, 108, 16, 'HintRing');
+                    this.drawSageDashedRing(slotNode, 116, 116, 18, 'HintRing');
                 }
             } else if (this.holdHintBuffers.indexOf(i) >= 0) {
-                this.drawSageDashedRing(slot, BUF_SLOT, BUF_SLOT, 18, 'HintRing');
+                this.drawSageDashedRing(slotNode, BUF_SLOT_W, BUF_SLOT_H, 28, 'HintRing');
             }
             if (
                 this.holdHint
@@ -1058,15 +1300,15 @@ export class GameController extends Component {
                 && this.holdHint.dest.index === i
                 && !item
             ) {
-                this.drawSageDashedRing(slot, BUF_SLOT, BUF_SLOT, 18, 'HintRing');
+                this.drawSageDashedRing(slotNode, BUF_SLOT_W, BUF_SLOT_H, 28, 'HintRing');
             }
 
-            slot.on(Node.EventType.TOUCH_END, () => {
+            slotNode.on(Node.EventType.TOUCH_END, () => {
                 this.onBufferTap(i);
             }, this);
         }
 
-        this.addLabel(wrap, 'BufCount', `柜台 ${filled}/${n}`, 24, MILK, 200, 36).setPosition(0, -boardH / 2 + 22, 0);
+        this.addLabel(plaque, 'BufCount', `柜台 ${filled}/${n}`, 28, MILK, 260, 40);
     }
 
     private onBufferTap(index: number) {
@@ -1087,7 +1329,17 @@ export class GameController extends Component {
         if (id === 'fruit') return this.foodFruit;
         if (id === 'meat') return this.foodMeat;
         if (id === 'sauce') return this.foodSauce;
+        if (id === 'grape') return this.foodGrape;
+        if (id === 'lemon') return this.foodLemon;
+        if (id === 'kiwi') return this.foodKiwi;
+        if (id === 'pineapple') return this.foodPineapple;
+        if (id === 'watermelon') return this.foodWatermelon;
+        if (id === 'coconut') return this.foodCoconut;
         return null;
+    }
+
+    private frameForBag(id: FoodId): SpriteFrame | null {
+        return this.bagFrames[id] || this.frameForFood(id);
     }
 
     private onBagTap(col: number, isTop: boolean) {
@@ -1127,7 +1379,7 @@ export class GameController extends Component {
             }
             const toWorld = slot.getComponent(UITransform)!.convertToWorldSpaceAR(new Vec3(0, 0, 0));
             to = ui.convertToNodeSpaceAR(toWorld);
-            land = new Vec3(64 / CARTON_W, 96 / CARTON_H, 1);
+            land = new Vec3(92 / BAG_TILE, 92 / BAG_TILE, 1);
         } else {
             const destIndex = board.dest && board.dest.kind === 'tray' ? board.dest.index : 0;
             const trayNode = root.getChildByName(`Tray${destIndex}`);
@@ -1140,10 +1392,10 @@ export class GameController extends Component {
             const fy = this.foodSlotY(m.slotH, board.trays[destIndex].cap, nextCount);
             const toWorld = trayNode.getComponent(UITransform)!.convertToWorldSpaceAR(new Vec3(0, fy, 0));
             to = ui.convertToNodeSpaceAR(toWorld);
-            land = new Vec3(TRAY_FOOD_W / CARTON_W, TRAY_FOOD_H / CARTON_H, 1);
+            land = new Vec3(TRAY_FOOD_W / BAG_TILE, TRAY_FOOD_H / BAG_TILE, 1);
         }
 
-        const flyer = this.addSprite(root, 'Flyer', this.frameForFood(item), CARTON_W, CARTON_H, from.x, from.y, Color.WHITE);
+        const flyer = this.addSprite(root, 'Flyer', this.frameForBag(item), BAG_TILE, BAG_TILE, from.x, from.y, Color.WHITE);
         tween(flyer)
             .to(FLY_SEC, { position: new Vec3(to.x, to.y, 0), scale: land }, { easing: easing.cubicOut })
             .start();
@@ -1889,7 +2141,7 @@ export class GameController extends Component {
     private showPlaceFail(result: PlaceFail) {
         const id = this.board ? this.board.level.id : 0;
         const teachSwitch = result.reason === 'wrong_kind' && (id === 4 || id === 7) && this.firstKindToast;
-        const sizeFail = id === 17 && result.reason === 'dest_full';
+        const sizeFail = this.mixedCaps() && result.reason === 'dest_full';
         if (!sizeFail) this.showToast(this.toastFor(result));
         this.flashTrays(result.hintTrays);
         this.flashBuffers(result.hintBuffers);
@@ -1911,7 +2163,7 @@ export class GameController extends Component {
             const i = this.holdHintBuffers[n];
             const slot = wrap.getChildByName(`Buffer${i}`);
             if (!slot) continue;
-            this.drawSageDashedRing(slot, BUF_SLOT, BUF_SLOT, 18, 'HintRing');
+            this.drawSageDashedRing(slot, BUF_SLOT_W, BUF_SLOT_H, 28, 'HintRing');
         }
     }
 
@@ -1998,11 +2250,11 @@ export class GameController extends Component {
             if (!slot) continue;
             const flash = new Node('HintFlash');
             flash.layer = UI_2D;
-            flash.addComponent(UITransform).setContentSize(BUF_SLOT, BUF_SLOT);
+            flash.addComponent(UITransform).setContentSize(BUF_SLOT_W, BUF_SLOT_H);
             const g = flash.addComponent(Graphics);
             g.strokeColor = SAGE;
             g.lineWidth = 8;
-            g.roundRect(-BUF_SLOT / 2 + 4, -BUF_SLOT / 2 + 4, BUF_SLOT - 8, BUF_SLOT - 8, 14);
+            g.roundRect(-BUF_SLOT_W / 2 + 4, -BUF_SLOT_H / 2 + 4, BUF_SLOT_W - 8, BUF_SLOT_H - 8, 28);
             g.stroke();
             const op = flash.addComponent(UIOpacity);
             op.opacity = 0;

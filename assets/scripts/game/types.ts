@@ -1,6 +1,31 @@
-export type FoodId = 'milk' | 'veg' | 'fruit' | 'meat' | 'sauce' | 'leftover';
+export type FoodId =
+    | 'milk'
+    | 'veg'
+    | 'fruit'
+    | 'meat'
+    | 'sauce'
+    | 'leftover'
+    | 'grape'
+    | 'lemon'
+    | 'kiwi'
+    | 'pineapple'
+    | 'watermelon'
+    | 'coconut';
 
-export const FOOD_IDS: FoodId[] = ['milk', 'veg', 'fruit', 'meat', 'sauce', 'leftover'];
+export const FOOD_IDS: FoodId[] = [
+    'milk',
+    'veg',
+    'fruit',
+    'meat',
+    'sauce',
+    'leftover',
+    'grape',
+    'lemon',
+    'kiwi',
+    'pineapple',
+    'watermelon',
+    'coconut',
+];
 
 export const FOOD_NAMES: Record<FoodId, string> = {
     milk: '牛奶',
@@ -9,6 +34,12 @@ export const FOOD_NAMES: Record<FoodId, string> = {
     meat: '肉',
     sauce: '酱',
     leftover: '剩菜',
+    grape: '葡萄',
+    lemon: '柠檬',
+    kiwi: '猕猴桃',
+    pineapple: '菠萝',
+    watermelon: '西瓜',
+    coconut: '椰子',
 };
 
 export type PlaceReason = 'wrong_kind' | 'anti_split' | 'no_target' | 'dest_full';

@@ -1,0 +1,14 @@
+{
+  "id": 18,
+  "title": "大格留给大摞",
+  "teach": "大格在左。葡萄进大格会锁死",
+  "trays": [{ "cap": 4 }, { "cap": 4 }, { "cap": 2 }, { "cap": 2 }],
+  "bags": [
+    ["veg", "veg", "grape"],
+    ["veg", "milk", "milk"],
+    ["veg", "veg", "milk"],
+    ["veg", "milk", "grape"]
+  ],
+  "buffer": 3,
+  "loseable": true
+}

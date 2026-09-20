@@ -1054,6 +1054,24 @@
     "foodSauce": {
       "__uuid__": "cc9a1cd4-86d6-4590-bf78-e264c01e8c06@f9941"
     },
+    "foodGrape": {
+      "__uuid__": "7c4e1a90-2b3d-4f5a-9c8e-1d2f3a4b5c6d@f9941"
+    },
+    "foodLemon": {
+      "__uuid__": "8d5f2b01-3c4e-406b-ad9f-2e3a4b5c6d7e@f9941"
+    },
+    "foodKiwi": {
+      "__uuid__": "9e603c12-4d5f-417c-bea0-3f4b5c6d7e8f@f9941"
+    },
+    "foodPineapple": {
+      "__uuid__": "af714d23-5e60-428d-cfb1-405c6d7e8f90@f9941"
+    },
+    "foodWatermelon": {
+      "__uuid__": "c1936f45-7082-44af-e1d3-627e8f901a2b@f9941"
+    },
+    "foodCoconut": {
+      "__uuid__": "b0825e34-6f71-439e-d0c2-516d7e8f901a@f9941"
+    },
     "iconUndo": {
       "__uuid__": "73fbe16c-3f5c-4230-854b-1948ab7cf28f@f9941"
     },

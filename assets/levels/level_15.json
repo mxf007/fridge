@@ -1,0 +1,14 @@
+{
+  "id": 15,
+  "title": "今晚这一层最难",
+  "teach": "本段最难。过关可晒步数",
+  "trays": [{ "cap": 3 }, { "cap": 3 }, { "cap": 3 }, { "cap": 3 }],
+  "bags": [
+    ["meat", "fruit", "veg"],
+    ["milk", "meat", "fruit"],
+    ["veg", "milk", "meat"],
+    ["fruit", "veg", "milk"]
+  ],
+  "buffer": 3,
+  "loseable": false
+}

@@ -1,0 +1,14 @@
+{
+  "id": 14,
+  "title": "先放到柜台少换格",
+  "teach": "顶层分散时，可以先放到柜台，少换几次格",
+  "trays": [{ "cap": 4 }, { "cap": 4 }, { "cap": 4 }],
+  "bags": [
+    ["veg", "milk", "fruit"],
+    ["fruit", "veg", "milk"],
+    ["milk", "fruit", "veg"],
+    ["milk", "veg", "fruit"]
+  ],
+  "buffer": 3,
+  "loseable": false
+}

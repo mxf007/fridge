@@ -1,0 +1,14 @@
+{
+  "id": 12,
+  "title": "肉也要收",
+  "teach": "肉登场。每列两种混叠，种类不对就换格",
+  "trays": [{ "cap": 3 }, { "cap": 3 }, { "cap": 3 }, { "cap": 3 }],
+  "bags": [
+    ["meat", "milk", "milk"],
+    ["milk", "veg", "veg"],
+    ["veg", "fruit", "fruit"],
+    ["fruit", "meat", "meat"]
+  ],
+  "buffer": 3,
+  "loseable": false
+}

@@ -1,0 +1,13 @@
+{
+  "id": 16,
+  "title": "尝尝酱",
+  "teach": "第五种：酱。只替换一种，不要五种全上",
+  "trays": [{ "cap": 3 }, { "cap": 3 }, { "cap": 3 }],
+  "bags": [
+    ["veg", "milk", "milk"],
+    ["sauce", "veg", "veg"],
+    ["milk", "sauce", "sauce"]
+  ],
+  "buffer": 3,
+  "loseable": false
+}

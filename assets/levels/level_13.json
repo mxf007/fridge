@@ -1,0 +1,13 @@
+{
+  "id": 13,
+  "title": "四种要轮着挖",
+  "teach": "三列四种，必须换列往下挖",
+  "trays": [{ "cap": 3 }, { "cap": 3 }, { "cap": 3 }, { "cap": 3 }],
+  "bags": [
+    ["meat", "fruit", "veg", "milk"],
+    ["milk", "meat", "fruit", "veg"],
+    ["veg", "milk", "meat", "fruit"]
+  ],
+  "buffer": 3,
+  "loseable": false
+}

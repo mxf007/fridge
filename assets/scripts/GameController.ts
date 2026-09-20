@@ -32,7 +32,14 @@ import { LEVEL_07, selfCheckLevel07 } from './game/level_07';
 import { LEVEL_08, selfCheckLevel08 } from './game/level_08';
 import { LEVEL_09, selfCheckLevel09 } from './game/level_09';
 import { LEVEL_10, selfCheckLevel10 } from './game/level_10';
-import type { FoodId, HintPick, LevelDef, PlaceFail, PlaceReason } from './game/types';
+import { LEVEL_11, selfCheckLevel11 } from './game/level_11';
+import { LEVEL_12, selfCheckLevel12 } from './game/level_12';
+import { LEVEL_13, selfCheckLevel13 } from './game/level_13';
+import { LEVEL_14, selfCheckLevel14 } from './game/level_14';
+import { LEVEL_15, selfCheckLevel15 } from './game/level_15';
+import { LEVEL_16, selfCheckLevel16 } from './game/level_16';
+import { LEVEL_17, selfCheckLevel17 } from './game/level_17';
+import type { Dest, FailReason, FoodId, HintPick, LevelDef, PlaceFail, PlaceReason } from './game/types';
 import { FOOD_NAMES } from './game/types';
 
 const { ccclass, property } = _decorator;
@@ -50,7 +57,7 @@ const SAGE = new Color(122, 158, 126, 255);
 
 const Y_TRAY = 250;
 const Y_BAG = -220;
-const Y_BUFFER = -508;
+const Y_BUFFER = -524;
 const BUF_SLOT = 148;
 const CARTON_W = 108;
 const CARTON_H = 177;
@@ -67,13 +74,15 @@ const UUID = {
     foodMilk: '518eca01-d30f-4b58-8867-0cc149828d77@f9941',
     foodVeg: 'daae9542-5e08-4113-b2ab-f4f41c5837c6@f9941',
     foodFruit: '87f8396a-b237-44ee-bfcf-6856a22a2794@f9941',
+    foodMeat: '948637a0-ae61-4105-bbf7-ddf5988257e2@f9941',
+    foodSauce: 'cc9a1cd4-86d6-4590-bf78-e264c01e8c06@f9941',
     iconUndo: '73fbe16c-3f5c-4230-854b-1948ab7cf28f@f9941',
     iconHint: '9be83f96-829c-4c60-9e25-590aa93e4e46@f9941',
     builtin: '20835ba4-6145-4fbc-a58a-051ce700aa3e@f9941',
 };
 
 const HOME_NODES = ['Bg', 'Title', 'BtnStart', 'AlbumLink', 'HomeBarMask'];
-const PLAYABLE: LevelDef[] = [LEVEL_01, LEVEL_02, LEVEL_03, LEVEL_04, LEVEL_05, LEVEL_06, LEVEL_07, LEVEL_08, LEVEL_09, LEVEL_10];
+const PLAYABLE: LevelDef[] = [LEVEL_01, LEVEL_02, LEVEL_03, LEVEL_04, LEVEL_05, LEVEL_06, LEVEL_07, LEVEL_08, LEVEL_09, LEVEL_10, LEVEL_11, LEVEL_12, LEVEL_13, LEVEL_14, LEVEL_15, LEVEL_16, LEVEL_17];
 const CLEARED_KEY = 'fridge_cleared';
 
 const TOAST: Record<PlaceReason, string> = {
@@ -95,6 +104,12 @@ export class GameController extends Component {
     foodFruit: SpriteFrame | null = null;
 
     @property({ type: SpriteFrame })
+    foodMeat: SpriteFrame | null = null;
+
+    @property({ type: SpriteFrame })
+    foodSauce: SpriteFrame | null = null;
+
+    @property({ type: SpriteFrame })
     iconUndo: SpriteFrame | null = null;
 
     @property({ type: SpriteFrame })
@@ -111,6 +126,9 @@ export class GameController extends Component {
     private holdHintBuffers: number[] = [];
     private holdHint: HintPick | null = null;
     private hintUsed = false;
+    private sizeTeach: null | 'intro' | 'too_small' = null;
+    private holdCapFlash: number | null = null;
+    private holdShakeKind: FoodId | null = null;
 
     onLoad() {
         selfCheckLevel01();
@@ -123,6 +141,13 @@ export class GameController extends Component {
         selfCheckLevel08();
         selfCheckLevel09();
         selfCheckLevel10();
+        selfCheckLevel11();
+        selfCheckLevel12();
+        selfCheckLevel13();
+        selfCheckLevel14();
+        selfCheckLevel15();
+        selfCheckLevel16();
+        selfCheckLevel17();
         this.bindHome();
         void this.ensureFrames();
     }
@@ -138,6 +163,8 @@ export class GameController extends Component {
         if (!this.foodMilk) this.foodMilk = await loadFrame(UUID.foodMilk);
         if (!this.foodVeg) this.foodVeg = await loadFrame(UUID.foodVeg);
         if (!this.foodFruit) this.foodFruit = await loadFrame(UUID.foodFruit);
+        if (!this.foodMeat) this.foodMeat = await loadFrame(UUID.foodMeat);
+        if (!this.foodSauce) this.foodSauce = await loadFrame(UUID.foodSauce);
         if (!this.iconUndo) this.iconUndo = await loadFrame(UUID.iconUndo);
         if (!this.iconHint) this.iconHint = await loadFrame(UUID.iconHint);
         this.builtin = await loadFrame(UUID.builtin);
@@ -159,6 +186,9 @@ export class GameController extends Component {
         this.holdHintBuffers = [];
         this.holdHint = null;
         this.hintUsed = false;
+        this.sizeTeach = level.id === 17 ? 'intro' : null;
+        this.holdCapFlash = null;
+        this.holdShakeKind = null;
         this.ensurePlayRoot();
         this.playRoot.active = true;
         this.render();
@@ -207,6 +237,7 @@ export class GameController extends Component {
         this.drawTrays(root, board);
         this.drawBags(root, board);
         this.drawBuffer(root, board);
+        if (this.sizeTeach && !board.isWin()) this.drawSizeTeach(root);
 
         if (board.isWin() && !this.holdWin) {
             this.addSprite(root, 'WinDim', this.builtin, 720, 1280, 0, 0, new Color(61, 50, 41, 102));
@@ -393,8 +424,23 @@ export class GameController extends Component {
         }
     }
 
+    private mixedCaps(): boolean {
+        const board = this.board;
+        if (!board || board.trays.length === 0) return false;
+        const cap0 = board.trays[0].cap;
+        return board.trays.some((t) => t.cap !== cap0);
+    }
+
+    private trayY(): number {
+        return Y_TRAY;
+    }
+
     private trayMetrics(cap: number) {
-        const scale = cap >= 4 ? 1.15 : cap <= 2 ? 0.85 : 1;
+        const n = this.board ? this.board.trays.length : 2;
+        const mixed = !!(this.board && this.board.trays.some((t) => t.cap !== this.board!.trays[0].cap));
+        let scale = cap >= 4 ? 1.15 : cap <= 2 ? 0.85 : 1;
+        if (mixed) scale = cap >= 4 ? 1.05 : cap <= 2 ? 0.72 : 0.9;
+        else if (n >= 4 && cap >= 3) scale = Math.min(scale, 0.88);
         const slotW = 140 * scale;
         const slotH = 340 * scale;
         const frame = 18 * scale;
@@ -403,14 +449,19 @@ export class GameController extends Component {
 
     private drawTrays(root: Node, board: BoardState) {
         const n = board.trays.length;
-        const gap = 24;
+        const gap = n >= 4 ? 12 : 24;
+        const metrics = board.trays.map((t) => this.trayMetrics(t.cap));
+        let total = gap * Math.max(n - 1, 0);
+        for (let i = 0; i < n; i++) total += metrics[i].outerW;
+        let cursor = -total / 2;
         for (let i = 0; i < n; i++) {
             const tray = board.trays[i];
-            const m = this.trayMetrics(tray.cap);
-            const x = (i - (n - 1) / 2) * (m.outerW + gap);
+            const m = metrics[i];
+            const x = cursor + m.outerW / 2;
+            cursor += m.outerW + gap;
             const node = new Node(`Tray${i}`);
             node.layer = UI_2D;
-            node.setPosition(x, Y_TRAY, 0);
+            node.setPosition(x, this.trayY(), 0);
             node.addComponent(UITransform).setContentSize(m.outerW, m.outerH);
             root.addChild(node);
 
@@ -445,7 +496,8 @@ export class GameController extends Component {
             if (selected && !closed && n > 1) this.drawDestBadge(node, m.outerH);
 
             if (!closed) {
-                this.drawFoodsInTray(node, tray.items, m.slotH);
+                if (this.mixedCaps()) this.drawCapacityLayers(node, m, tray.cap, tray.items.length);
+                this.drawFoodsInTray(node, tray.items, m.slotH, tray.cap);
             }
 
             if (closing && tray.sealed) {
@@ -502,6 +554,279 @@ export class GameController extends Component {
         return door;
     }
 
+    private minTrayCap(): number {
+        const board = this.board;
+        if (!board || board.trays.length === 0) return 2;
+        let min = board.trays[0].cap;
+        for (let i = 1; i < board.trays.length; i++) {
+            if (board.trays[i].cap < min) min = board.trays[i].cap;
+        }
+        return min;
+    }
+
+    private kindIsTall(kind: FoodId): boolean {
+        return this.mixedCaps() && this.countKind(kind) > this.minTrayCap();
+    }
+
+    private unplacedKind(kind: FoodId): number {
+        const board = this.board;
+        if (!board) return 0;
+        let n = 0;
+        for (let c = 0; c < board.bags.length; c++) {
+            const col = board.bags[c];
+            for (let k = 0; k < col.length; k++) if (col[k] === kind) n += 1;
+        }
+        for (let i = 0; i < board.buffer.length; i++) {
+            if (board.buffer[i] === kind) n += 1;
+        }
+        return n;
+    }
+
+    private kindTint(kind: FoodId): Color {
+        if (kind === 'milk') return new Color(255, 253, 248, 255);
+        if (kind === 'veg') return new Color(122, 158, 126, 255);
+        if (kind === 'fruit') return new Color(224, 122, 95, 255);
+        if (kind === 'meat') return new Color(166, 90, 70, 255);
+        if (kind === 'sauce') return new Color(180, 80, 50, 255);
+        return FRAME;
+    }
+
+    private shouldDimKind(kind: FoodId): boolean {
+        const board = this.board;
+        if (!board || !this.mixedCaps() || !board.dest || board.dest.kind !== 'tray') return false;
+        const tray = board.trays[board.dest.index];
+        if (!tray || tray.sealed) return false;
+        const tall = this.kindIsTall(kind);
+        if (tray.cap <= 2) return tall;
+        if (tray.cap >= 4) return !tall;
+        return false;
+    }
+
+    private foodSlotY(slotH: number, cap: number, index: number): number {
+        if (this.mixedCaps() && cap > 0) {
+            const pad = 18;
+            const step = (slotH - pad * 2) / cap;
+            return -slotH / 2 + pad + step * (index + 0.5);
+        }
+        return -slotH / 2 + 20 + TRAY_FOOD_H / 2 + index * (TRAY_FOOD_H + TRAY_FOOD_GAP);
+    }
+
+    private drawCapacityLayers(
+        node: Node,
+        m: { slotW: number; slotH: number },
+        cap: number,
+        filled: number,
+    ) {
+        const layers = new Node('Layers');
+        layers.layer = UI_2D;
+        layers.addComponent(UITransform).setContentSize(m.slotW, m.slotH);
+        const g = layers.addComponent(Graphics);
+        const pad = 18;
+        const step = (m.slotH - pad * 2) / cap;
+        const h = Math.max(step - 8, 22);
+        const w = m.slotW * 0.7;
+        for (let i = 0; i < cap; i++) {
+            const y = this.foodSlotY(m.slotH, cap, i);
+            if (i < filled) {
+                g.fillColor = new Color(255, 255, 255, 16);
+                g.roundRect(-w / 2, y - h / 2, w, h, 10);
+                g.fill();
+            } else {
+                g.fillColor = new Color(255, 253, 248, 42);
+                g.roundRect(-w / 2, y - h / 2, w, h, 10);
+                g.fill();
+                g.strokeColor = new Color(255, 253, 248, 170);
+                g.lineWidth = 2;
+                g.roundRect(-w / 2, y - h / 2, w, h, 10);
+                g.stroke();
+            }
+        }
+        node.addChild(layers);
+    }
+
+    private drawGhostStack(parent: Node, kind: FoodId, count: number, y: number) {
+        if (count <= 0) return;
+        const ghost = new Node('Ghost');
+        ghost.layer = UI_2D;
+        ghost.setPosition(0, y, 0);
+        ghost.addComponent(UITransform).setContentSize(88, count * 18 + 12);
+        const g = ghost.addComponent(Graphics);
+        const tint = this.kindTint(kind);
+        const layerH = 17;
+        const w = 76;
+        for (let i = 0; i < count; i++) {
+            const gy = (i - (count - 1) / 2) * 14;
+            g.fillColor = new Color(tint.r, tint.g, tint.b, 55 + i * 12);
+            g.roundRect(-w / 2, gy - layerH / 2, w, layerH, 8);
+            g.fill();
+            g.strokeColor = new Color(tint.r, tint.g, tint.b, 120);
+            g.lineWidth = 2;
+            g.roundRect(-w / 2, gy - layerH / 2, w, layerH, 8);
+            g.stroke();
+        }
+        parent.addChild(ghost);
+    }
+
+    private drawSizeTeach(root: Node) {
+        if (this.sizeTeach !== 'intro') return;
+        const old = root.getChildByName('SizeTeach');
+        if (old) old.destroy();
+
+        const note = new Node('SizeTeach');
+        note.layer = UI_2D;
+        note.setPosition(0, 6, 0);
+        note.angle = -3;
+        note.setScale(0.9, 0.9, 1);
+        note.addComponent(UITransform).setContentSize(500, 88);
+        const paper = note.addComponent(Graphics);
+        paper.fillColor = MILK;
+        paper.roundRect(-250, -44, 500, 88, 10);
+        paper.fill();
+        paper.strokeColor = new Color(107, 74, 58, 48);
+        paper.lineWidth = 2;
+        paper.roundRect(-250, -44, 500, 88, 10);
+        paper.stroke();
+        paper.fillColor = WHEAT;
+        paper.roundRect(-196, 30, 52, 16, 3);
+        paper.fill();
+        paper.roundRect(144, 30, 52, 16, 3);
+        paper.fill();
+        root.addChild(note);
+
+        this.drawHeightMatch(note, -150, 6, 2);
+        this.drawHeightMatch(note, 150, 6, 4);
+        this.addLabel(note, 'Rule', '合理收纳', 24, new Color(107, 74, 58, 200), 220, 36).setPosition(0, -4, 0);
+
+        tween(note)
+            .to(0.28, { scale: new Vec3(1, 1, 1) }, { easing: easing.backOut })
+            .start();
+    }
+
+    private drawHeightMatch(parent: Node, x: number, y: number, layers: number) {
+        const pair = new Node(`Match${layers}`);
+        pair.layer = UI_2D;
+        pair.setPosition(x, y, 0);
+        pair.addComponent(UITransform).setContentSize(120, 72);
+        const g = pair.addComponent(Graphics);
+        const stackW = 28;
+        const layerH = 10;
+        const gap = 3;
+        const stackH = layers * layerH + (layers - 1) * gap;
+        const stackX = -34;
+        const stackBottom = -stackH / 2;
+        for (let i = 0; i < layers; i++) {
+            const ly = stackBottom + i * (layerH + gap);
+            g.fillColor = layers <= 2 ? SAGE : FRAME;
+            g.roundRect(stackX - stackW / 2, ly, stackW, layerH, 3);
+            g.fill();
+        }
+        const shelfH = 18 + layers * 10;
+        const shelfW = 22;
+        g.fillColor = WALNUT;
+        g.roundRect(18, -shelfH / 2, shelfW, shelfH, 5);
+        g.fill();
+        g.fillColor = new Color(232, 243, 246, 255);
+        g.roundRect(22, -shelfH / 2 + 4, 14, shelfH - 8, 3);
+        g.fill();
+        parent.addChild(pair);
+    }
+
+    private countKind(kind: FoodId): number {
+        const board = this.board;
+        if (!board) return 0;
+        let n = 0;
+        for (let i = 0; i < board.trays.length; i++) {
+            const items = board.trays[i].items;
+            for (let k = 0; k < items.length; k++) if (items[k] === kind) n += 1;
+        }
+        for (let c = 0; c < board.bags.length; c++) {
+            const col = board.bags[c];
+            for (let k = 0; k < col.length; k++) if (col[k] === kind) n += 1;
+        }
+        for (let i = 0; i < board.buffer.length; i++) {
+            if (board.buffer[i] === kind) n += 1;
+        }
+        return n;
+    }
+
+    private noteSizeTeach(item: FoodId, dest: Dest) {
+        const board = this.board;
+        if (!board || board.level.id !== 17 || board.isWin()) {
+            this.sizeTeach = null;
+            return;
+        }
+        if (dest.kind !== 'tray') {
+            if (this.sizeTeach === 'intro') this.sizeTeach = null;
+            return;
+        }
+        const tray = board.trays[dest.index];
+        if (tray.cap < this.countKind(item)) {
+            this.holdCapFlash = dest.index;
+            this.holdShakeKind = item;
+            return;
+        }
+        this.sizeTeach = null;
+    }
+
+    private prepareSizeFail(result: PlaceFail) {
+        const board = this.board;
+        if (!board || board.level.id !== 17 || result.reason !== 'dest_full') return;
+        const dest = board.dest;
+        if (!dest || dest.kind !== 'tray' || board.trays[dest.index].cap > 2) return;
+        this.holdCapFlash = dest.index;
+        this.holdShakeKind = result.item;
+    }
+
+    private playSizeFeedback() {
+        if (this.holdCapFlash != null) this.flashCapacity(this.holdCapFlash);
+        if (this.holdShakeKind) this.shakeKindBags(this.holdShakeKind);
+        this.holdCapFlash = null;
+        this.holdShakeKind = null;
+    }
+
+    private flashCapacity(index: number) {
+        const root = this.playRoot;
+        const board = this.board;
+        if (!root || !board) return;
+        const tray = root.getChildByName(`Tray${index}`);
+        if (!tray) return;
+        const m = this.trayMetrics(board.trays[index].cap);
+        const cap = board.trays[index].cap;
+        const filled = board.trays[index].items.length;
+        const flash = new Node('CapFlash');
+        flash.layer = UI_2D;
+        flash.addComponent(UITransform).setContentSize(m.slotW, m.slotH);
+        const g = flash.addComponent(Graphics);
+        g.strokeColor = CORAL;
+        g.lineWidth = 5;
+        const pad = 18;
+        const step = (m.slotH - pad * 2) / cap;
+        const h = Math.max(step - 8, 22);
+        const w = m.slotW * 0.7;
+        for (let i = filled; i < cap; i++) {
+            const y = this.foodSlotY(m.slotH, cap, i);
+            g.roundRect(-w / 2, y - h / 2, w, h, 10);
+            g.stroke();
+        }
+        const op = flash.addComponent(UIOpacity);
+        op.opacity = 0;
+        tray.addChild(flash);
+        tween(op)
+            .to(0.1, { opacity: 255 })
+            .to(0.1, { opacity: 40 })
+            .to(0.1, { opacity: 255 })
+            .to(0.12, { opacity: 0 })
+            .start();
+    }
+
+    private shakeKindBags(kind: FoodId) {
+        const board = this.board;
+        if (!board) return;
+        for (let c = 0; c < board.bags.length; c++) {
+            if (board.peekBag(c) === kind) this.shakeBagTop(c);
+        }
+    }
+
     private drawDestBadge(tray: Node, outerH: number) {
         const badge = new Node('DestBadge');
         badge.layer = UI_2D;
@@ -519,7 +844,7 @@ export class GameController extends Component {
             .start();
     }
 
-    private drawSwitchGuide(tray: Node, m: { outerW: number; outerH: number }) {
+    private drawSwitchGuide(tray: Node, m: { outerW: number; outerH: number }, tipText = '点这格') {
         const old = tray.getChildByName('SwitchGuide');
         if (old) old.destroy();
         const guide = new Node('SwitchGuide');
@@ -548,7 +873,7 @@ export class GameController extends Component {
         tg.fillColor = SAGE;
         tg.roundRect(-80, -22, 160, 44, 22);
         tg.fill();
-        this.addLabel(tip, 'Txt', '点这格', 24, MILK, 150, 36);
+        this.addLabel(tip, 'Txt', tipText, 24, MILK, 150, 36);
         tray.addChild(tip);
         tween(tip)
             .to(0.4, { position: new Vec3(0, -m.outerH / 2 - 16, 0) }, { easing: easing.sineInOut })
@@ -604,10 +929,12 @@ export class GameController extends Component {
             .start();
     }
 
-    private drawFoodsInTray(node: Node, items: FoodId[], slotH: number) {
+    private drawFoodsInTray(node: Node, items: FoodId[], slotH: number, cap = 4) {
         const bottom = -slotH / 2 + 20;
         for (let k = 0; k < items.length; k++) {
-            const fy = bottom + TRAY_FOOD_H / 2 + k * (TRAY_FOOD_H + TRAY_FOOD_GAP);
+            const fy = this.mixedCaps()
+                ? this.foodSlotY(slotH, cap, k)
+                : bottom + TRAY_FOOD_H / 2 + k * (TRAY_FOOD_H + TRAY_FOOD_GAP);
             this.addSprite(node, `Food${k}`, this.frameForFood(items[k]), TRAY_FOOD_W, TRAY_FOOD_H, 0, fy, Color.WHITE);
         }
     }
@@ -642,6 +969,7 @@ export class GameController extends Component {
                 const w = isTop ? CARTON_W : CARTON_W * 0.92;
                 const ht = isTop ? CARTON_H : CARTON_H * 0.92;
                 const tint = isTop ? Color.WHITE : new Color(153, 153, 153, 255);
+                if (this.mixedCaps() && isTop) this.drawGhostStack(colNode, col[i], this.unplacedKind(col[i]), y);
                 const tileNode = this.addSprite(
                     colNode,
                     `T${i}`,
@@ -652,6 +980,15 @@ export class GameController extends Component {
                     y,
                     tint,
                 );
+                if (isTop && this.shouldDimKind(col[i])) {
+                    const dim = tileNode.addComponent(UIOpacity);
+                    dim.opacity = 115;
+                    const ghost = colNode.getChildByName('Ghost');
+                    if (ghost) {
+                        const gop = ghost.addComponent(UIOpacity);
+                        gop.opacity = 120;
+                    }
+                }
                 tileNode.on(Node.EventType.TOUCH_END, () => {
                     this.onBagTap(c, isTop);
                 }, this);
@@ -748,6 +1085,8 @@ export class GameController extends Component {
         if (id === 'milk') return this.foodMilk;
         if (id === 'veg') return this.foodVeg;
         if (id === 'fruit') return this.foodFruit;
+        if (id === 'meat') return this.foodMeat;
+        if (id === 'sauce') return this.foodSauce;
         return null;
     }
 
@@ -798,7 +1137,7 @@ export class GameController extends Component {
             }
             const nextCount = board.trays[destIndex].items.length;
             const m = this.trayMetrics(board.trays[destIndex].cap);
-            const fy = -m.slotH / 2 + 20 + TRAY_FOOD_H / 2 + nextCount * (TRAY_FOOD_H + TRAY_FOOD_GAP);
+            const fy = this.foodSlotY(m.slotH, board.trays[destIndex].cap, nextCount);
             const toWorld = trayNode.getComponent(UITransform)!.convertToWorldSpaceAR(new Vec3(0, fy, 0));
             to = ui.convertToNodeSpaceAR(toWorld);
             land = new Vec3(TRAY_FOOD_W / CARTON_W, TRAY_FOOD_H / CARTON_H, 1);
@@ -844,7 +1183,7 @@ export class GameController extends Component {
         const from = ui.convertToNodeSpaceAR(food.worldPosition);
         const nextCount = board.trays[destIndex].items.length;
         const m = this.trayMetrics(board.trays[destIndex].cap);
-        const fy = -m.slotH / 2 + 20 + TRAY_FOOD_H / 2 + nextCount * (TRAY_FOOD_H + TRAY_FOOD_GAP);
+        const fy = this.foodSlotY(m.slotH, board.trays[destIndex].cap, nextCount);
         const toWorld = trayNode.getComponent(UITransform)!.convertToWorldSpaceAR(new Vec3(0, fy, 0));
         const to = ui.convertToNodeSpaceAR(toWorld);
         const flyer = this.addSprite(root, 'Flyer', this.frameForFood(item), 64, 96, from.x, from.y, Color.WHITE);
@@ -868,12 +1207,15 @@ export class GameController extends Component {
         const result = board.placeFromBuffer(index);
         if (!result.ok) {
             this.busy = false;
+            this.prepareSizeFail(result);
             this.render();
             this.showPlaceFail(result);
+            this.playSizeFeedback();
             return;
         }
         this.holdHint = null;
         this.holdHintBuffers = [];
+        this.noteSizeTeach(result.item, result.dest);
         const win = board.isWin();
         this.animateDoorIndex = result.sealed && result.dest.kind === 'tray' ? result.dest.index : null;
         this.holdWin = win;
@@ -887,24 +1229,14 @@ export class GameController extends Component {
                     .call(() => {
                         this.animateDoorIndex = null;
                         if (tray) this.bounceNode(tray);
-                        if (win) {
-                            this.scheduleOnce(() => this.playWinReward(), WIN_DELAY);
-                        } else {
-                            this.busy = false;
-                            this.render();
-                        }
+                        this.finishMove(win);
                     })
                     .start();
                 return;
             }
         }
         this.animateDoorIndex = null;
-        if (win) {
-            this.scheduleOnce(() => this.playWinReward(), WIN_DELAY);
-        } else {
-            this.holdWin = false;
-            this.busy = false;
-        }
+        this.finishMove(win);
     }
 
     private commitPlace(col: number) {
@@ -917,12 +1249,15 @@ export class GameController extends Component {
         const result = board.placeFromBag(col);
         if (!result.ok) {
             this.busy = false;
+            this.prepareSizeFail(result);
             this.render();
             this.showPlaceFail(result);
+            this.playSizeFeedback();
             return;
         }
         this.holdHint = null;
         this.holdHintBuffers = [];
+        this.noteSizeTeach(result.item, result.dest);
         const win = board.isWin();
         this.animateDoorIndex = result.sealed && result.dest.kind === 'tray' ? result.dest.index : null;
         this.holdWin = win;
@@ -937,24 +1272,182 @@ export class GameController extends Component {
                         this.animateDoorIndex = null;
                         const sealedTray = tray;
                         if (sealedTray) this.bounceNode(sealedTray);
-                        if (win) {
-                            this.scheduleOnce(() => this.playWinReward(), WIN_DELAY);
-                        } else {
-                            this.busy = false;
-                            this.render();
-                        }
+                        this.finishMove(win);
                     })
                     .start();
                 return;
             }
         }
         this.animateDoorIndex = null;
+        this.finishMove(win);
+    }
+
+    private finishMove(win: boolean) {
         if (win) {
             this.scheduleOnce(() => this.playWinReward(), WIN_DELAY);
-        } else {
-            this.holdWin = false;
-            this.busy = false;
+            return;
         }
+        this.holdWin = false;
+        const board = this.board;
+        const reason = board ? board.failReason() : null;
+        if (reason) {
+            this.playSizeFeedback();
+            this.onFail(reason);
+            return;
+        }
+        this.busy = false;
+        this.render();
+        this.playSizeFeedback();
+    }
+
+    private onFail(reason: FailReason) {
+        const board = this.board;
+        const id = board ? board.level.id : 0;
+        if (id < 17) {
+            console.log(`[fridge] unexpected fail L${id} ${reason}`);
+            this.restartLevel();
+            return;
+        }
+        this.busy = true;
+        this.flashFail(reason, () => this.spawnFailCard(reason));
+    }
+
+    private flashFail(reason: FailReason, done: () => void) {
+        const root = this.playRoot;
+        const board = this.board;
+        if (!root || !board) {
+            done();
+            return;
+        }
+        const targets: Node[] = [];
+        if (reason === 'buffer_full') {
+            const wrap = root.getChildByName('BufferBoard');
+            if (wrap) {
+                for (let i = 0; i < board.buffer.length; i++) {
+                    const slot = wrap.getChildByName(`Buffer${i}`);
+                    if (slot) targets.push(slot);
+                }
+            }
+        } else {
+            for (let i = 0; i < board.trays.length; i++) {
+                if (!board.trays[i].sealed) continue;
+                const tray = root.getChildByName(`Tray${i}`);
+                if (tray) targets.push(tray);
+            }
+        }
+        for (let i = 0; i < targets.length; i++) {
+            this.pulseCoral(targets[i]);
+        }
+        this.scheduleOnce(done, 0.42);
+    }
+
+    private pulseCoral(node: Node) {
+        const ui = node.getComponent(UITransform);
+        const w = ui ? ui.width : 160;
+        const h = ui ? ui.height : 160;
+        const flash = new Node('FailFlash');
+        flash.layer = UI_2D;
+        flash.addComponent(UITransform).setContentSize(w, h);
+        const g = flash.addComponent(Graphics);
+        g.fillColor = new Color(224, 122, 95, 140);
+        g.roundRect(-w / 2, -h / 2, w, h, 22);
+        g.fill();
+        const op = flash.addComponent(UIOpacity);
+        op.opacity = 0;
+        node.addChild(flash);
+        tween(op)
+            .to(0.1, { opacity: 220 })
+            .to(0.1, { opacity: 40 })
+            .to(0.1, { opacity: 220 })
+            .to(0.1, { opacity: 0 })
+            .start();
+    }
+
+    private spawnFailCard(reason: FailReason) {
+        const root = this.playRoot;
+        const board = this.board;
+        if (!root || !board) {
+            this.busy = false;
+            return;
+        }
+        const old = root.getChildByName('FailCard');
+        if (old) old.destroy();
+
+        const locked = reason === 'locked_out';
+        const title = locked ? '这格锁错了' : '柜台堆满了';
+        const desc = locked ? '看一段广告，退回到还能收的一步' : '看一段广告，本关多一格继玩';
+        const cta = locked ? '退回可收的一步' : '多一格继玩';
+
+        const card = new Node('FailCard');
+        card.layer = UI_2D;
+        card.setPosition(0, -200, 0);
+        card.setScale(0.86, 0.86, 1);
+        card.addComponent(UITransform).setContentSize(600, 460);
+        const cg = card.addComponent(Graphics);
+        cg.fillColor = CREAM;
+        cg.roundRect(-300, -230, 600, 460, 36);
+        cg.fill();
+        cg.lineWidth = 3;
+        cg.strokeColor = new Color(107, 74, 58, 50);
+        cg.roundRect(-300, -230, 600, 460, 36);
+        cg.stroke();
+        const cardOp = card.addComponent(UIOpacity);
+        cardOp.opacity = 0;
+        root.addChild(card);
+
+        this.addLabel(card, 'FailTitle', title, 40, WALNUT, 520, 52).setPosition(0, 168, 0);
+        const body = this.addLabel(card, 'FailDesc', desc, 26, FRAME, 520, 72);
+        body.setPosition(0, 108, 0);
+        const bodyLb = body.getComponent(Label);
+        if (bodyLb) {
+            bodyLb.enableWrapText = true;
+            bodyLb.overflow = Label.Overflow.CLAMP;
+        }
+
+        const main = new Node('FailCta');
+        main.layer = UI_2D;
+        main.setPosition(0, 18, 0);
+        main.addComponent(UITransform).setContentSize(480, 88);
+        const mg = main.addComponent(Graphics);
+        mg.fillColor = CORAL;
+        mg.roundRect(-240, -44, 480, 88, 44);
+        mg.fill();
+        this.addLabel(main, 'Txt', cta, 32, MILK, 440, 48);
+        card.addChild(main);
+        this.paintAdDot(main);
+        const ad = main.getChildByName('AdDot');
+        if (ad) ad.setPosition(210, 28, 0);
+        this.bindHudPress(main, () => this.showToast('广告还没接上'));
+
+        const share = new Node('FailShare');
+        share.layer = UI_2D;
+        share.setPosition(0, -86, 0);
+        share.addComponent(UITransform).setContentSize(480, 80);
+        const sg = share.addComponent(Graphics);
+        sg.fillColor = MILK;
+        sg.roundRect(-240, -40, 480, 80, 40);
+        sg.fill();
+        sg.lineWidth = 2;
+        sg.strokeColor = new Color(107, 74, 58, 51);
+        sg.roundRect(-240, -40, 480, 80, 40);
+        sg.stroke();
+        this.addLabel(share, 'Txt', '让好友也收这一层', 28, WALNUT, 440, 44);
+        card.addChild(share);
+        const levelId = board.level.id;
+        this.bindHudPress(share, () => {
+            this.showToast(`第 ${levelId} 关这层我收不进去了`);
+            this.startLevel(board.level);
+        });
+
+        const retry = this.addLabel(card, 'FailRetry', '重开本关', 26, new Color(107, 74, 58, 153), 280, 40);
+        retry.setPosition(0, -168, 0);
+        this.bindHudPress(retry, () => this.restartLevel());
+
+        tween(cardOp).to(0.2, { opacity: 255 }).start();
+        tween(card)
+            .to(0.32, { position: new Vec3(0, -180, 0), scale: new Vec3(1.04, 1.04, 1) }, { easing: easing.backOut })
+            .to(0.1, { scale: new Vec3(1, 1, 1) })
+            .start();
     }
 
     private bounceNode(node: Node) {
@@ -992,6 +1485,7 @@ export class GameController extends Component {
 
         this.scheduleOnce(() => {
             this.spawnNextLevelBtn(root);
+            this.spawnShareStepsBtn(root, board.steps);
             this.busy = false;
         }, 2.05);
     }
@@ -1000,7 +1494,7 @@ export class GameController extends Component {
         const board = this.board;
         const pack = new Node('PrideGlow');
         pack.layer = UI_2D;
-        pack.setPosition(0, Y_TRAY, 0);
+        pack.setPosition(0, this.trayY(), 0);
         pack.addComponent(UITransform).setContentSize(8, 8);
         const first = root.getChildByName('Tray0');
         root.insertChild(pack, first ? first.getSiblingIndex() : 0);
@@ -1360,17 +1854,50 @@ export class GameController extends Component {
         }, this);
     }
 
+    private spawnShareStepsBtn(root: Node, steps: number) {
+        const id = this.board ? this.board.level.id : 0;
+        if (id !== 15 && id !== 25 && id !== 30) return;
+        const old = root.getChildByName('BtnShareSteps');
+        if (old) old.destroy();
+
+        const btn = new Node('BtnShareSteps');
+        btn.layer = UI_2D;
+        btn.setPosition(0, -430, 0);
+        btn.setScale(0.55, 0.55, 1);
+        btn.addComponent(UITransform).setContentSize(520, 80);
+        const g = btn.addComponent(Graphics);
+        g.fillColor = SAGE;
+        g.roundRect(-260, -40, 520, 80, 40);
+        g.fill();
+        this.addLabel(btn, 'ShareLabel', '分享步数', 32, MILK, 480, 48);
+        const op = btn.addComponent(UIOpacity);
+        op.opacity = 0;
+        root.addChild(btn);
+
+        tween(op).delay(0.12).to(0.18, { opacity: 255 }).start();
+        tween(btn)
+            .delay(0.12)
+            .to(0.34, { position: new Vec3(0, -430, 0), scale: new Vec3(1.06, 1.06, 1) }, { easing: easing.backOut })
+            .to(0.1, { scale: new Vec3(1, 1, 1) })
+            .start();
+
+        this.bindHudPress(btn, () => {
+            this.showToast(`我把今晚的冰箱收好了，用了 ${steps} 步`);
+        });
+    }
+
     private showPlaceFail(result: PlaceFail) {
         const id = this.board ? this.board.level.id : 0;
         const teachSwitch = result.reason === 'wrong_kind' && (id === 4 || id === 7) && this.firstKindToast;
-        this.showToast(this.toastFor(result));
+        const sizeFail = id === 17 && result.reason === 'dest_full';
+        if (!sizeFail) this.showToast(this.toastFor(result));
         this.flashTrays(result.hintTrays);
         this.flashBuffers(result.hintBuffers);
         if (teachSwitch) {
             this.holdHintTrays = result.hintTrays.slice();
             this.attachSwitchGuides();
         }
-        if (id === 10 && result.reason === 'wrong_kind' && result.hintBuffers.length > 0) {
+        if ((id === 10 || id === 14) && result.reason === 'wrong_kind' && result.hintBuffers.length > 0) {
             this.holdHintBuffers = result.hintBuffers.slice();
             this.attachBufferGuides();
         }
@@ -1410,6 +1937,14 @@ export class GameController extends Component {
             if (id === 10 && this.firstKindToast) {
                 this.firstKindToast = false;
                 return '可以点下面的空盘放下';
+            }
+            if (id === 11 && this.firstKindToast) {
+                this.firstKindToast = false;
+                return '去点空格，或已经在收这种的那一格';
+            }
+            if (id === 14 && this.firstKindToast) {
+                this.firstKindToast = false;
+                return '可以先放到柜台，少换几次格';
             }
             const dest = this.board && this.board.dest;
             const kind = dest && dest.kind === 'tray' ? this.board!.trays[dest.index].kind : null;

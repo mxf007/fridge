@@ -1048,6 +1048,12 @@
     "foodFruit": {
       "__uuid__": "87f8396a-b237-44ee-bfcf-6856a22a2794@f9941"
     },
+    "foodMeat": {
+      "__uuid__": "948637a0-ae61-4105-bbf7-ddf5988257e2@f9941"
+    },
+    "foodSauce": {
+      "__uuid__": "cc9a1cd4-86d6-4590-bf78-e264c01e8c06@f9941"
+    },
     "iconUndo": {
       "__uuid__": "73fbe16c-3f5c-4230-854b-1948ab7cf28f@f9941"
     },

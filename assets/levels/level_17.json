@@ -1,0 +1,13 @@
+{
+  "id": 17,
+  "title": "大件要进大格",
+  "teach": "小格在左。大件必须进大格",
+  "trays": [{ "cap": 2 }, { "cap": 4 }, { "cap": 2 }, { "cap": 4 }],
+  "bags": [
+    ["veg", "veg", "fruit", "fruit"],
+    ["veg", "veg", "milk", "milk"],
+    ["veg", "veg", "milk", "milk"]
+  ],
+  "buffer": 3,
+  "loseable": true
+}

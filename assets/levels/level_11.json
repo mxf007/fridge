@@ -1,0 +1,13 @@
+{
+  "id": 11,
+  "title": "格子认第一种",
+  "teach": "弹回了就去点空格，或已经在收这种的那一格",
+  "trays": [{ "cap": 3 }, { "cap": 3 }, { "cap": 3 }],
+  "bags": [
+    ["fruit", "milk", "veg"],
+    ["veg", "fruit", "milk"],
+    ["milk", "veg", "fruit"]
+  ],
+  "buffer": 3,
+  "loseable": false
+}

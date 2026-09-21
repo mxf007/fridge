@@ -20,6 +20,7 @@ import {
     easing,
     sys,
     tween,
+    view,
 } from 'cc';
 import { BoardState } from './game/BoardState';
 import { LEVEL_01, selfCheckLevel01 } from './game/level_01';
@@ -358,7 +359,7 @@ export class GameController extends Component {
     }
 
     private drawHud(parent: Node) {
-        const y = 544;
+        const y = this.hudY();
         const pill = new Node('LevelPill');
         pill.layer = UI_2D;
         pill.setPosition(0, y, 0);
@@ -394,6 +395,34 @@ export class GameController extends Component {
                 dim.opacity = 110;
             }
             this.bindHudPress(hint, () => this.onHintTap());
+        }
+    }
+
+    /** 微信刘海和右上角胶囊以下。编辑器里按顶栏 96px。只动 HUD。 */
+    private hudY(): number {
+        const canvasUi = this.node.getComponent(UITransform);
+        const canvasH = canvasUi && canvasUi.height > 0 ? canvasUi.height : view.getVisibleSize().height;
+        const top = canvasH / 2;
+        const inset = this.wechatTopInset();
+        return top - inset - 8 - 44;
+    }
+
+    private wechatTopInset(): number {
+        const fallback = 96;
+        const wxApi = (globalThis as { wx?: WechatMiniGame }).wx;
+        if (!wxApi) return fallback;
+        const visibleW = view.getVisibleSize().width || 720;
+        try {
+            const info = wxApi.getWindowInfo ? wxApi.getWindowInfo() : wxApi.getSystemInfoSync?.();
+            const windowW = info && (info.windowWidth || info.screenWidth);
+            const scale = windowW ? visibleW / windowW : 1;
+            let top = info && info.safeArea ? info.safeArea.top : info && info.statusBarHeight ? info.statusBarHeight : 0;
+            const menu = wxApi.getMenuButtonBoundingClientRect?.();
+            if (menu && menu.bottom) top = Math.max(top, menu.bottom);
+            const design = Math.round(top * scale);
+            return design > 0 ? design : fallback;
+        } catch {
+            return fallback;
         }
     }
 
@@ -2419,6 +2448,19 @@ export class GameController extends Component {
         parent.addChild(node);
         return node;
     }
+}
+
+interface WechatMiniGame {
+    getWindowInfo?: () => WechatWindowInfo;
+    getSystemInfoSync?: () => WechatWindowInfo;
+    getMenuButtonBoundingClientRect?: () => { bottom: number };
+}
+
+interface WechatWindowInfo {
+    windowWidth?: number;
+    screenWidth?: number;
+    statusBarHeight?: number;
+    safeArea?: { top: number };
 }
 
 function loadFrame(uuid: string): Promise<SpriteFrame | null> {

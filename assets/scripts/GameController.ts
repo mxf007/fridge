@@ -57,17 +57,16 @@ const CORAL = new Color(224, 122, 95, 255);
 const SAGE = new Color(122, 158, 126, 255);
 
 const Y_TRAY = 250;
-const Y_BAG = -220;
 const Y_BUFFER = -524;
-/** buffer_board.png 720×220 上三格奶油盘：中心与外框（相对木板中心，Y 向上）。 */
+/** buffer_board.png 720×220 上三格奶油盘：中心相对木板中心（Y 向上）。 */
 const BUF_BOARD_W = 720;
 const BUF_BOARD_H = 220;
 const BUF_SLOT_W = 168;
 const BUF_SLOT_H = 140;
+/** 柜台格里只放食物图标，不带托盘。 */
+const BUF_FOOD = 112;
 const BUF_WELL_Y = 16;
 const BUF_WELL_XS = [-198, 0, 194];
-const BAG_TILE = 112;
-const BAG_STEP = 30;
 const TRAY_FOOD_W = 50.4;
 const TRAY_FOOD_H = 76.8;
 const TRAY_FOOD_GAP = 4;
@@ -75,6 +74,11 @@ const FLY_SEC = 0.22;
 const DOOR_SEC = 0.28;
 const WIN_DELAY = 0.5;
 const WHEAT = new Color(212, 176, 120, 255);
+const TABLE_TOP = new Color(248, 242, 232, 255);
+const TABLE_FRONT = new Color(232, 220, 206, 255);
+const TABLE_SHADOW = new Color(61, 50, 41, 46);
+const TABLE_SLOT = new Color(126, 92, 72, 120);
+const TABLE_SLOT_INNER = new Color(255, 255, 255, 60);
 
 const UUID = {
     foodMilk: '518eca01-d30f-4b58-8867-0cc149828d77@f9941',
@@ -101,6 +105,13 @@ const UUID = {
     bagWatermelon: '701c53b4-de68-419f-8a05-c26d4e81bf53@f9941',
     bagCoconut: '812d64c5-ef79-42a0-8b16-d37e5f92c064@f9941',
     bgPlay: 'b4d8e2a0-6c19-4f3b-91d7-5e8a0c2f4b63@f9941',
+    bgPlayWall: 'd1012f55-9340-4b85-ae10-2091d7f20001@f9941',
+    worktopTop: 'd1022f55-9340-4b85-ae10-2091d7f20002@f9941',
+    worktopFront: 'd1032f55-9340-4b85-ae10-2091d7f20003@f9941',
+    bagHidden: 'd1052f55-9340-4b85-ae10-2091d7f20005@f9941',
+    bagTrayLip: 'd1132f55-9340-4b85-ae10-2091d7f20013@f9941',
+    bagTrayLower: 'd1142f55-9340-4b85-ae10-2091d7f20014@f9941',
+    bagTrayTop: 'd1152f55-9340-4b85-ae10-2091d7f20015@f9941',
     bufferBoard: 'a41d431c-862d-48e8-9b57-b2cb36108f8e@f9941',
     trayEmpty: '6f229be7-9378-4d91-a617-1d2d45218e74@f9941',
     traySealed: '8085b3c5-21f0-4bcc-b990-c97f4c899dca@f9941',
@@ -165,6 +176,13 @@ export class GameController extends Component {
     private playRoot: Node | null = null;
     private builtin: SpriteFrame | null = null;
     private bgPlay: SpriteFrame | null = null;
+    private bgPlayWall: SpriteFrame | null = null;
+    private worktopTop: SpriteFrame | null = null;
+    private worktopFront: SpriteFrame | null = null;
+    private bagHidden: SpriteFrame | null = null;
+    private bagTrayLip: SpriteFrame | null = null;
+    private bagTrayLower: SpriteFrame | null = null;
+    private bagTrayTop: SpriteFrame | null = null;
     private bufferBoard: SpriteFrame | null = null;
     private trayEmpty: SpriteFrame | null = null;
     private traySealed: SpriteFrame | null = null;
@@ -180,6 +198,8 @@ export class GameController extends Component {
     private sizeTeach: null | 'intro' | 'too_small' = null;
     private holdCapFlash: number | null = null;
     private holdShakeKind: FoodId | null = null;
+    private revealBagCol: number | null = null;
+    private lockedBagCol: number | null = null;
 
     onLoad() {
         selfCheckLevel01();
@@ -244,6 +264,13 @@ export class GameController extends Component {
         if (!this.iconUndo) this.iconUndo = await loadFrame(UUID.iconUndo);
         if (!this.iconHint) this.iconHint = await loadFrame(UUID.iconHint);
         if (!this.bgPlay) this.bgPlay = await loadFrame(UUID.bgPlay);
+        if (!this.bgPlayWall) this.bgPlayWall = await loadFrame(UUID.bgPlayWall);
+        if (!this.worktopTop) this.worktopTop = await loadFrame(UUID.worktopTop);
+        if (!this.worktopFront) this.worktopFront = await loadFrame(UUID.worktopFront);
+        if (!this.bagHidden) this.bagHidden = await loadFrame(UUID.bagHidden);
+        if (!this.bagTrayLip) this.bagTrayLip = await loadFrame(UUID.bagTrayLip);
+        if (!this.bagTrayLower) this.bagTrayLower = await loadFrame(UUID.bagTrayLower);
+        if (!this.bagTrayTop) this.bagTrayTop = await loadFrame(UUID.bagTrayTop);
         if (!this.bufferBoard) this.bufferBoard = await loadFrame(UUID.bufferBoard);
         if (!this.trayEmpty) this.trayEmpty = await loadFrame(UUID.trayEmpty);
         if (!this.traySealed) this.traySealed = await loadFrame(UUID.traySealed);
@@ -269,6 +296,8 @@ export class GameController extends Component {
         this.sizeTeach = level.id === 17 ? 'intro' : null;
         this.holdCapFlash = null;
         this.holdShakeKind = null;
+        this.revealBagCol = null;
+        this.lockedBagCol = null;
         this.ensurePlayRoot();
         this.playRoot.active = true;
         this.render();
@@ -312,11 +341,14 @@ export class GameController extends Component {
         if (!root || !board) return;
         root.removeAllChildren();
 
-        this.addSprite(root, 'PlayBg', this.bgPlay || this.builtin, 720, 1280, 0, 0, this.bgPlay ? Color.WHITE : CREAM);
-        this.drawHud(root);
+        const wall = this.bgPlay || this.bgPlayWall;
+        this.addSprite(root, 'PlayBgWall', wall || this.builtin, 720, 1280, 0, 0, wall ? Color.WHITE : CREAM);
         this.drawTrays(root, board);
+        this.drawWorktopBack(root);
         this.drawBags(root, board);
+        this.drawWorktopFront(root);
         this.drawBuffer(root, board);
+        this.drawHud(root);
         if (this.sizeTeach && !board.isWin()) this.drawSizeTeach(root);
 
         if (board.isWin() && !this.holdWin) {
@@ -527,7 +559,7 @@ export class GameController extends Component {
         return { slotW, slotH, frame, outerW: slotW + frame * 2, outerH: slotH + frame * 2, cap };
     }
 
-    /** a832 版格子：胡桃/木色外框 + 冷光内腔；收满灰门合上（含关门动画）。 */
+    /** 昨晚最终版槽位：胡桃/木色外框 + 冷光内腔；收满后灰门合上。 */
     private drawTrays(root: Node, board: BoardState) {
         const n = board.trays.length;
         const gap = n >= 4 ? 12 : 24;
@@ -574,7 +606,6 @@ export class GameController extends Component {
             }
             node.addChild(gNode);
             if (selected && !closed) node.setScale(1.06, 1.06, 1);
-            if (selected && !closed && n > 1) this.drawDestBadge(node, m.outerH);
 
             if (!closed) {
                 if (this.mixedCaps()) this.drawCapacityLayers(node, m, tray.cap, tray.items.length);
@@ -691,12 +722,15 @@ export class GameController extends Component {
     }
 
     private foodSlotY(slotH: number, cap: number, index: number): number {
-        if (this.mixedCaps() && cap > 0) {
-            const pad = 18;
-            const step = (slotH - pad * 2) / cap;
-            return -slotH / 2 + pad + step * (index + 0.5);
-        }
-        return -slotH / 2 + 20 + TRAY_FOOD_H / 2 + index * (TRAY_FOOD_H + TRAY_FOOD_GAP);
+        const pad = 16;
+        const step = (slotH - pad * 2) / Math.max(cap, 1);
+        return -slotH / 2 + pad + step * (index + 0.5);
+    }
+
+    private trayFoodSize(slotH: number, cap: number) {
+        const step = (slotH - 32) / Math.max(cap, 1);
+        const h = Math.min(TRAY_FOOD_H, Math.max(42, step * 0.88));
+        return { w: h * (TRAY_FOOD_W / TRAY_FOOD_H), h };
     }
 
     private drawCapacityLayers(
@@ -837,6 +871,13 @@ export class GameController extends Component {
         return n;
     }
 
+    private dismissSizeIntro() {
+        if (this.sizeTeach !== 'intro') return;
+        this.sizeTeach = null;
+        const note = this.playRoot?.getChildByName('SizeTeach');
+        if (note) note.destroy();
+    }
+
     private noteSizeTeach(item: FoodId, dest: Dest) {
         const board = this.board;
         if (!board || !this.mixedCaps() || board.isWin()) {
@@ -913,23 +954,6 @@ export class GameController extends Component {
         for (let c = 0; c < board.bags.length; c++) {
             if (board.peekBag(c) === kind) this.shakeBagTop(c);
         }
-    }
-
-    private drawDestBadge(tray: Node, outerH: number) {
-        const badge = new Node('DestBadge');
-        badge.layer = UI_2D;
-        badge.setPosition(0, outerH / 2 + 6, 0);
-        badge.addComponent(UITransform).setContentSize(140, 40);
-        const g = badge.addComponent(Graphics);
-        g.fillColor = CORAL;
-        g.roundRect(-70, -20, 140, 40, 20);
-        g.fill();
-        this.addLabel(badge, 'Txt', '放这里', 22, MILK, 130, 32);
-        tray.addChild(badge);
-        badge.setScale(0.86, 0.86, 1);
-        tween(badge)
-            .to(0.22, { scale: new Vec3(1, 1, 1) }, { easing: easing.backOut })
-            .start();
     }
 
     private drawSwitchGuide(tray: Node, m: { outerW: number; outerH: number }, tipText = '点这格') {
@@ -1017,14 +1041,35 @@ export class GameController extends Component {
             .start();
     }
 
-    private drawFoodsInTray(node: Node, items: FoodId[], slotH: number, cap = 4) {
-        const bottom = -slotH / 2 + 20;
+    private drawFoodsInTray(node: Node, items: FoodId[], slotH: number, cap = 4, centerY = 0) {
+        const size = this.trayFoodSize(slotH, cap);
         for (let k = 0; k < items.length; k++) {
-            const fy = this.mixedCaps()
-                ? this.foodSlotY(slotH, cap, k)
-                : bottom + TRAY_FOOD_H / 2 + k * (TRAY_FOOD_H + TRAY_FOOD_GAP);
-            this.addSprite(node, `Food${k}`, this.frameForFood(items[k]), TRAY_FOOD_W, TRAY_FOOD_H, 0, fy, Color.WHITE);
+            const fy = centerY + this.foodSlotY(slotH, cap, k);
+            this.addSprite(node, `Food${k}`, this.frameForFood(items[k]), size.w, size.h, 0, fy, Color.WHITE);
         }
+    }
+
+    /** 三列时托盘接近示意图大小；列变多再缩小，避免挤出屏幕。 */
+    private bagLayout(columns: number): {
+        w: number;
+        trayH: number;
+        step: number;
+        gap: number;
+        food: number;
+    } {
+        const gap = columns <= 3 ? 28 : 16;
+        const w = Math.min(188, Math.floor((680 - gap * Math.max(columns - 1, 0)) / Math.max(columns, 1)));
+        /** 整盘 512×302，前唇从 y=246 起，约 56px。食物按凹槽收，不按整盘宽放大。 */
+        const trayH = Math.round(w * (302 / 512));
+        const step = Math.max(12, Math.round(trayH * (56 / 302)));
+        const food = Math.round(w * 0.46);
+        return { w, trayH, step, gap, food };
+    }
+
+    /** 每层都是同一张整盘，层距只露出前唇。 */
+    private columnHeight(layout: { trayH: number; step: number }, len: number): number {
+        if (len <= 0) return 0;
+        return layout.trayH + layout.step * (len - 1);
     }
 
     private bagAnchorY(board: BoardState): number {
@@ -1032,61 +1077,161 @@ export class GameController extends Component {
         for (let c = 0; c < board.bags.length; c++) {
             if (board.bags[c].length > maxLen) maxLen = board.bags[c].length;
         }
-        const h = BAG_TILE + BAG_STEP * Math.max(maxLen - 1, 0);
-        const top = Y_BAG + h / 2;
-        const limit = 48;
-        return top <= limit ? Y_BAG : Y_BAG - (top - limit);
+        const layout = this.bagLayout(board.bags.length);
+        const h = this.columnHeight(layout, maxLen);
+        /** 落在台面上，底边留在柜台木板上方。 */
+        const seat = -360;
+        let anchor = seat + h / 2;
+        const top = anchor + h / 2;
+        const limit = 36;
+        if (top > limit) anchor -= top - limit;
+        return anchor;
+    }
+
+    /** 工作台顶面比屏幕宽。左右出屏，只露出托盘这一段。 */
+    private drawWorktopBack(root: Node) {
+        if (this.worktopTop) {
+            const w = 1480;
+            const h = Math.round(w * (380 / 720));
+            this.addSprite(root, 'WorktopTop', this.worktopTop, w, h, 0, -210, Color.WHITE);
+            return;
+        }
+        const top = new Node('WorktopTop');
+        top.layer = UI_2D;
+        top.setPosition(0, -300, 0);
+        top.addComponent(UITransform).setContentSize(720, 380);
+        const g = top.addComponent(Graphics);
+        g.fillColor = TABLE_TOP;
+        g.moveTo(-340, 140);
+        g.lineTo(340, 140);
+        g.lineTo(312, -140);
+        g.lineTo(-312, -140);
+        g.close();
+        g.fill();
+        root.addChild(top);
+    }
+
+    /** 工作台前立面跟台面同宽，上沿停在托盘底边下面。 */
+    private drawWorktopFront(root: Node) {
+        if (this.worktopFront) {
+            this.addSprite(root, 'WorktopFront', this.worktopFront, 1480, 160, 0, -460, Color.WHITE);
+            return;
+        }
+        const front = new Node('WorktopFront');
+        front.layer = UI_2D;
+        front.setPosition(0, -462, 0);
+        front.addComponent(UITransform).setContentSize(680, 120);
+        const g = front.addComponent(Graphics);
+        g.fillColor = TABLE_FRONT;
+        g.roundRect(-340, -60, 680, 120, 28);
+        g.fill();
+        g.fillColor = new Color(255, 255, 255, 70);
+        g.roundRect(-322, 32, 644, 16, 8);
+        g.fill();
+        root.addChild(front);
+    }
+
+    /** C：桌面槽位外框（每列一个凹槽），提升中层“收纳感”。 */
+    private drawFoodSlotFrame(parent: Node, w: number, h: number) {
+        const slot = new Node('FoodSlot');
+        slot.layer = UI_2D;
+        slot.addComponent(UITransform).setContentSize(w, h);
+        const g = slot.addComponent(Graphics);
+        g.fillColor = TABLE_SLOT;
+        g.roundRect(-w / 2, -h / 2, w, h, 18);
+        g.fill();
+        g.fillColor = TABLE_SLOT_INNER;
+        g.roundRect(-w / 2 + 6, -h / 2 + 10, w - 12, h - 20, 14);
+        g.fill();
+        g.strokeColor = new Color(255, 255, 255, 70);
+        g.lineWidth = 2;
+        g.roundRect(-w / 2 + 6, -h / 2 + 10, w - 12, h - 20, 14);
+        g.stroke();
+        parent.addChild(slot);
+        return slot;
     }
 
     private drawBags(root: Node, board: BoardState) {
         const n = board.bags.length;
+        const layout = this.bagLayout(n);
+        let maxLen = 0;
+        for (let c = 0; c < n; c++) {
+            if (board.bags[c].length > maxLen) maxLen = board.bags[c].length;
+        }
         const yBag = this.bagAnchorY(board);
+        const baseline = yBag - this.columnHeight(layout, maxLen) / 2;
         for (let c = 0; c < n; c++) {
             const col = board.bags[c];
-            const x = (c - (n - 1) / 2) * (BAG_TILE + 28);
-            const h = BAG_TILE + BAG_STEP * Math.max(col.length - 1, 0);
+            const count = col.length;
+            if (count <= 0) continue;
+            const x = (c - (n - 1) / 2) * (layout.w + layout.gap);
+            const h = this.columnHeight(layout, count);
             const colNode = new Node(`Bag${c}`);
             colNode.layer = UI_2D;
-            colNode.setPosition(x, yBag, 0);
-            colNode.addComponent(UITransform).setContentSize(BAG_TILE, Math.max(h, 88));
+            colNode.setPosition(x, baseline + h / 2, 0);
+            colNode.addComponent(UITransform).setContentSize(layout.w, h);
             root.addChild(colNode);
 
-            for (let i = 0; i < col.length; i++) {
-                const isTop = i === col.length - 1;
-                const y = (i - (col.length - 1) / 2) * BAG_STEP;
-                const tile = isTop ? BAG_TILE : BAG_TILE * 0.92;
-                if (this.mixedCaps() && isTop) this.drawGhostStack(colNode, col[i], this.unplacedKind(col[i]), y);
+            const shadow = new Node('ContactShadow');
+            shadow.layer = UI_2D;
+            shadow.setPosition(0, -h / 2 + 2, 0);
+            shadow.addComponent(UITransform).setContentSize(layout.w, 28);
+            const sg = shadow.addComponent(Graphics);
+            sg.fillColor = new Color(61, 50, 41, 110);
+            sg.ellipse(0, 0, layout.w * 0.42, 10);
+            sg.fill();
+            colNode.addChild(shadow);
+
+            for (let i = 0; i < count; i++) {
+                const isTop = i === count - 1;
+                const y = -h / 2 + layout.trayH / 2 + i * layout.step;
                 const tileNode = this.addSprite(
                     colNode,
                     `T${i}`,
-                    this.frameForBag(col[i]),
-                    tile,
-                    tile,
+                    this.bagTrayLower || this.bagTrayTop || this.builtin,
+                    layout.w,
+                    layout.trayH,
                     0,
                     y,
+                    isTop ? this.trayTint(col[i]) : Color.WHITE,
+                );
+                if (!isTop) continue;
+                const foodY = Math.round(layout.trayH * 0.08);
+                const foodShadow = new Node('FoodShadow');
+                foodShadow.layer = UI_2D;
+                foodShadow.setPosition(0, foodY - Math.round(layout.food * 0.34), 0);
+                foodShadow.addComponent(UITransform).setContentSize(layout.food, 18);
+                const foodShade = foodShadow.addComponent(Graphics);
+                foodShade.fillColor = new Color(72, 54, 42, 130);
+                foodShade.ellipse(0, 0, layout.food * 0.38, 6);
+                foodShade.fill();
+                tileNode.addChild(foodShadow);
+                const foodNode = this.addSprite(
+                    tileNode,
+                    'Food',
+                    this.frameForFood(col[i]),
+                    layout.food,
+                    layout.food,
+                    0,
+                    foodY,
                     Color.WHITE,
                 );
-                if (!isTop) {
-                    const dim = tileNode.addComponent(UIOpacity);
-                    dim.opacity = 153;
+                if (this.revealBagCol === c) {
+                    tileNode.setPosition(0, y - layout.step, 0);
+                    const op = tileNode.addComponent(UIOpacity);
+                    op.opacity = 0;
+                    tween(tileNode).to(0.18, { position: new Vec3(0, y, 0) }, { easing: easing.cubicOut }).start();
+                    tween(op).to(0.18, { opacity: 255 }).start();
                 }
-                if (isTop && this.shouldDimKind(col[i])) {
-                    const dim = tileNode.addComponent(UIOpacity);
-                    dim.opacity = 115;
-                    const ghost = colNode.getChildByName('Ghost');
-                    if (ghost) {
-                        const gop = ghost.addComponent(UIOpacity);
-                        gop.opacity = 120;
-                    }
-                }
-                tileNode.on(Node.EventType.TOUCH_END, () => {
-                    this.onBagTap(c, isTop);
-                }, this);
-                if (isTop && this.holdHint && this.holdHint.bagCol === c) {
-                    this.drawSageDashedRing(tileNode, tile + 12, tile + 12, 18, 'HintRing');
+                const tap = () => this.onBagTap(c, true);
+                tileNode.on(Node.EventType.TOUCH_END, tap, this);
+                foodNode.on(Node.EventType.TOUCH_END, tap, this);
+                if (this.holdHint && this.holdHint.bagCol === c) {
+                    this.drawSageDashedRing(foodNode, layout.food + 12, layout.food + 12, 18, 'HintRing');
                 }
             }
         }
+        this.revealBagCol = null;
     }
 
     private bufferSlotX(index: number, count: number): number {
@@ -1095,7 +1240,7 @@ export class GameController extends Component {
         return (index - (count - 1) / 2) * (span / Math.max(count - 1, 1));
     }
 
-    /** 贴住奶油凹盘外沿：槽内暖光 + 珊瑚描边 + 奶色内圈。胡桃细线在木底上几乎看不见。 */
+    /** 贴住奶油凹盘外沿：槽内暖光 + 珊瑚描边 + 奶色内圈。 */
     private drawBufferSelect(slot: Node) {
         const w = BUF_SLOT_W;
         const h = BUF_SLOT_H;
@@ -1132,7 +1277,12 @@ export class GameController extends Component {
         wrap.setPosition(0, Y_BUFFER, 0);
         wrap.addComponent(UITransform).setContentSize(BUF_BOARD_W, BUF_BOARD_H);
         root.addChild(wrap);
-        this.addSprite(wrap, 'Wood', this.bufferBoard || this.builtin, BUF_BOARD_W, BUF_BOARD_H, 0, 0, Color.WHITE);
+        const wood = this.addSprite(wrap, 'Wood', this.bufferBoard || this.builtin, BUF_BOARD_W, BUF_BOARD_H, 0, 0, Color.WHITE);
+        // 柜台图必须按原图像素对齐，避免裁切/拉伸把左右格中心拉开
+        const woodSp = wood.getComponent(Sprite);
+        if (woodSp) woodSp.sizeMode = Sprite.SizeMode.RAW;
+        const woodUi = wood.getComponent(UITransform);
+        if (woodUi) woodUi.setContentSize(BUF_BOARD_W, BUF_BOARD_H);
 
         const plaqueW = 300;
         const plaqueH = 52;
@@ -1168,9 +1318,9 @@ export class GameController extends Component {
 
             const item = board.buffer[i];
             if (item) {
-                this.addSprite(slotNode, 'Food', this.frameForBag(item), 108, 108, 0, 0, Color.WHITE);
+                this.addSprite(slotNode, 'Food', this.frameForFood(item), BUF_FOOD, BUF_FOOD, 0, 0, Color.WHITE);
                 if (this.holdHint && this.holdHint.bufferIndex === i) {
-                    this.drawSageDashedRing(slotNode, 116, 116, 18, 'HintRing');
+                    this.drawSageDashedRing(slotNode, BUF_FOOD + 8, BUF_FOOD + 8, 18, 'HintRing');
                 }
             } else if (this.holdHintBuffers.indexOf(i) >= 0) {
                 this.drawSageDashedRing(slotNode, BUF_SLOT_W, BUF_SLOT_H, 28, 'HintRing');
@@ -1201,6 +1351,7 @@ export class GameController extends Component {
             this.render();
             return;
         }
+        this.dismissSizeIntro();
         this.placeFromBuffer(index);
     }
 
@@ -1223,13 +1374,33 @@ export class GameController extends Component {
         return this.bagFrames[id] || this.frameForFood(id);
     }
 
+    /** 只有栈顶整盘染色。下层前唇保持奶油色，避免泄露种类。 */
+    private trayTint(id: FoodId): Color {
+        const tint: Partial<Record<FoodId, [number, number, number]>> = {
+            veg: [176, 198, 156],
+            fruit: [224, 150, 142],
+            meat: [210, 158, 146],
+            sauce: [220, 170, 112],
+            leftover: [206, 190, 168],
+            grape: [214, 196, 214],
+            lemon: [228, 208, 132],
+            kiwi: [168, 196, 124],
+            pineapple: [222, 190, 104],
+            watermelon: [214, 136, 142],
+            coconut: [232, 216, 188],
+        };
+        const rgb = tint[id];
+        return rgb ? new Color(rgb[0], rgb[1], rgb[2], 255) : Color.WHITE;
+    }
+
     private onBagTap(col: number, isTop: boolean) {
         const board = this.board;
         const root = this.playRoot;
         if (!board || !root || this.busy || board.isWin()) return;
-        if (!isTop) return;
+        if (!isTop || this.lockedBagCol === col) return;
         const item = board.peekBag(col);
         if (!item) return;
+        this.dismissSizeIntro();
         const check = board.canAccept(board.dest, item, 'bag');
         if (!check.ok) {
             const result = board.placeFromBag(col);
@@ -1246,11 +1417,19 @@ export class GameController extends Component {
         }
 
         this.busy = true;
-        top.active = false;
+        const toBuffer = board.dest != null && board.dest.kind === 'buffer';
+        const foodNode = top.getChildByName('Food');
+        const fromNode = foodNode || top;
+        const fromWorld = fromNode.worldPosition.clone();
+        if (toBuffer || !foodNode) top.active = false;
+        else foodNode.active = false;
         const ui = root.getComponent(UITransform)!;
-        const from = ui.convertToNodeSpaceAR(top.worldPosition);
+        const from = ui.convertToNodeSpaceAR(fromWorld);
         let to = new Vec3(from.x, from.y, 0);
         let land = new Vec3(1, 1, 1);
+        let flyFrame = this.frameForFood(item);
+        let flyW = 72;
+        let flyH = 96;
         if (board.dest && board.dest.kind === 'buffer') {
             const wrap = root.getChildByName('BufferBoard');
             const slot = wrap ? wrap.getChildByName(`Buffer${board.dest.index}`) : null;
@@ -1260,7 +1439,10 @@ export class GameController extends Component {
             }
             const toWorld = slot.getComponent(UITransform)!.convertToWorldSpaceAR(new Vec3(0, 0, 0));
             to = ui.convertToNodeSpaceAR(toWorld);
-            land = new Vec3(92 / BAG_TILE, 92 / BAG_TILE, 1);
+            flyFrame = this.frameForFood(item);
+            flyW = 96;
+            flyH = 96;
+            land = new Vec3(BUF_FOOD / 96, BUF_FOOD / 96, 1);
         } else {
             const destIndex = board.dest && board.dest.kind === 'tray' ? board.dest.index : 0;
             const trayNode = root.getChildByName(`Tray${destIndex}`);
@@ -1273,10 +1455,11 @@ export class GameController extends Component {
             const fy = this.foodSlotY(m.slotH, board.trays[destIndex].cap, nextCount);
             const toWorld = trayNode.getComponent(UITransform)!.convertToWorldSpaceAR(new Vec3(0, fy, 0));
             to = ui.convertToNodeSpaceAR(toWorld);
-            land = new Vec3(TRAY_FOOD_W / BAG_TILE, TRAY_FOOD_H / BAG_TILE, 1);
+            const size = this.trayFoodSize(m.slotH, board.trays[destIndex].cap);
+            land = new Vec3(size.w / flyW, size.h / flyH, 1);
         }
 
-        const flyer = this.addSprite(root, 'Flyer', this.frameForBag(item), BAG_TILE, BAG_TILE, from.x, from.y, Color.WHITE);
+        const flyer = this.addSprite(root, 'Flyer', flyFrame, flyW, flyH, from.x, from.y, Color.WHITE);
         tween(flyer)
             .to(FLY_SEC, { position: new Vec3(to.x, to.y, 0), scale: land }, { easing: easing.cubicOut })
             .start();
@@ -1320,7 +1503,8 @@ export class GameController extends Component {
         const toWorld = trayNode.getComponent(UITransform)!.convertToWorldSpaceAR(new Vec3(0, fy, 0));
         const to = ui.convertToNodeSpaceAR(toWorld);
         const flyer = this.addSprite(root, 'Flyer', this.frameForFood(item), 64, 96, from.x, from.y, Color.WHITE);
-        const land = new Vec3(TRAY_FOOD_W / 64, TRAY_FOOD_H / 96, 1);
+        const size = this.trayFoodSize(m.slotH, board.trays[destIndex].cap);
+        const land = new Vec3(size.w / 64, size.h / 96, 1);
         tween(flyer)
             .to(FLY_SEC, { position: new Vec3(to.x, to.y, 0), scale: land }, { easing: easing.cubicOut })
             .start();
@@ -1390,6 +1574,14 @@ export class GameController extends Component {
         }
         this.holdHint = null;
         this.holdHintBuffers = [];
+        this.revealBagCol = board.bags[col].length > 0 ? col : null;
+        if (this.revealBagCol != null) {
+            const locked = this.revealBagCol;
+            this.lockedBagCol = locked;
+            this.scheduleOnce(() => {
+                if (this.lockedBagCol === locked) this.lockedBagCol = null;
+            }, 0.18);
+        }
         this.noteSizeTeach(result.item, result.dest);
         const win = board.isWin();
         this.animateDoorIndex = result.sealed && result.dest.kind === 'tray' ? result.dest.index : null;
@@ -1429,7 +1621,6 @@ export class GameController extends Component {
             return;
         }
         this.busy = false;
-        this.render();
         this.playSizeFeedback();
     }
 

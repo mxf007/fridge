@@ -1793,7 +1793,7 @@ export class GameController extends Component {
 
         const card = new Node('FailCard');
         card.layer = UI_2D;
-        card.setPosition(0, -200, 0);
+        card.setPosition(0, -40, 0);
         card.setScale(0.86, 0.86, 1);
         card.addComponent(UITransform).setContentSize(600, 460);
         const cg = card.addComponent(Graphics);
@@ -1858,7 +1858,7 @@ export class GameController extends Component {
 
         tween(cardOp).to(0.2, { opacity: 255 }).start();
         tween(card)
-            .to(0.32, { position: new Vec3(0, -180, 0), scale: new Vec3(1.04, 1.04, 1) }, { easing: easing.backOut })
+            .to(0.32, { position: new Vec3(0, 0, 0), scale: new Vec3(1.04, 1.04, 1) }, { easing: easing.backOut })
             .to(0.1, { scale: new Vec3(1, 1, 1) })
             .start();
     }

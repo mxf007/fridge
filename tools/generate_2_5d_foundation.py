@@ -48,9 +48,10 @@ def make_worktop_top() -> Image.Image:
     shadow = shadow.filter(ImageFilter.GaussianBlur(18))
     image = Image.alpha_composite(image, shadow)
     draw = ImageDraw.Draw(image)
-    draw.polygon([(20, 62), (700, 62), (674, 342), (46, 342)], fill=(243, 234, 219, 255))
-    draw.line([(42, 82), (678, 82)], fill=(255, 253, 248, 170), width=8)
-    draw.line([(48, 338), (672, 338)], fill=(180, 151, 126, 70), width=4)
+    # 冷奶油顶面 + 暖 taupe 前缘，拉开台面层次
+    draw.polygon([(20, 62), (700, 62), (674, 342), (46, 342)], fill=(248, 240, 228, 255))
+    draw.line([(42, 82), (678, 82)], fill=(252, 248, 242, 190), width=8)
+    draw.line([(48, 338), (672, 338)], fill=(176, 142, 108, 120), width=5)
     return image
 
 
@@ -62,9 +63,9 @@ def make_worktop_front() -> Image.Image:
     shadow = shadow.filter(ImageFilter.GaussianBlur(12))
     image = Image.alpha_composite(image, shadow)
     draw = ImageDraw.Draw(image)
-    draw.rounded_rectangle((20, 4, 700, 126), radius=30, fill=(224, 207, 188, 255))
-    draw.rounded_rectangle((38, 14, 682, 35), radius=10, fill=(255, 255, 255, 70))
-    draw.line((48, 118, 672, 118), fill=(143, 112, 91, 55), width=3)
+    draw.rounded_rectangle((20, 4, 700, 126), radius=30, fill=(186, 154, 122, 255))
+    draw.rounded_rectangle((38, 14, 682, 35), radius=10, fill=(255, 248, 238, 78))
+    draw.line((48, 118, 672, 118), fill=(142, 110, 82, 70), width=3)
     return image
 
 

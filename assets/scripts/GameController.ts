@@ -68,15 +68,15 @@ const BUF_SLOT_H = 140;
 const BUF_FOOD = 112;
 const BUF_WELL_Y = 16;
 const BUF_WELL_XS = [-198, 0, 194];
-const TRAY_FOOD_W = 50.4;
-const TRAY_FOOD_H = 76.8;
+const TRAY_FOOD_W = 46;
+const TRAY_FOOD_H = 70;
 const TRAY_FOOD_GAP = 4;
 const FLY_SEC = 0.22;
 const DOOR_SEC = 0.28;
 const WIN_DELAY = 0.5;
 const WHEAT = new Color(212, 176, 120, 255);
-const TABLE_TOP = new Color(248, 242, 232, 255);
-const TABLE_FRONT = new Color(232, 220, 206, 255);
+const TABLE_TOP = new Color(248, 240, 228, 255);
+const TABLE_FRONT = new Color(186, 154, 122, 255);
 const TABLE_SHADOW = new Color(61, 50, 41, 46);
 const TABLE_SLOT = new Color(126, 92, 72, 120);
 const TABLE_SLOT_INNER = new Color(255, 255, 255, 60);
@@ -1113,8 +1113,19 @@ export class GameController extends Component {
         /** 整盘 512×302，前唇从 y=246 起，约 56px。食物按凹槽收，不按整盘宽放大。 */
         const trayH = Math.round(w * (302 / 512));
         const step = Math.max(12, Math.round(trayH * (56 / 302)));
-        const food = Math.round(w * 0.46);
+        const food = Math.round(w * 0.39);
         return { w, trayH, step, gap, food };
+    }
+
+    /** 叠盘凹槽内食材尺寸：高盒略瘦高，圆果近方，避免正方形撑出前唇。 */
+    private bagFoodSize(kind: FoodId, food: number): { w: number; h: number } {
+        if (kind === 'milk' || kind === 'sauce' || kind === 'pineapple') {
+            return { w: Math.round(food * 0.72), h: food };
+        }
+        if (kind === 'veg' || kind === 'meat' || kind === 'leftover' || kind === 'watermelon') {
+            return { w: Math.round(food * 0.92), h: Math.round(food * 0.82) };
+        }
+        return { w: Math.round(food * 0.88), h: Math.round(food * 0.88) };
     }
 
     /** 每层都是同一张整盘，层距只露出前唇。 */
@@ -1260,22 +1271,26 @@ export class GameController extends Component {
                     isTop ? this.trayTint(col[i]) : Color.WHITE,
                 );
                 if (!isTop) continue;
-                const foodY = Math.round(layout.trayH * 0.08);
+                const foodSize = this.bagFoodSize(col[i], layout.food);
+                // 盘心偏前：前唇约占底 18%，落点取几何中心略靠前唇一侧。
+                // 中心 = 落点 + 高度系数，保证高盒/矮果底边落在同一接触面。
+                const seatY = Math.round(layout.trayH * -0.04);
+                const foodY = seatY + Math.round(foodSize.h * 0.22);
                 const foodShadow = new Node('FoodShadow');
                 foodShadow.layer = UI_2D;
-                foodShadow.setPosition(0, foodY - Math.round(layout.food * 0.34), 0);
-                foodShadow.addComponent(UITransform).setContentSize(layout.food, 18);
+                foodShadow.setPosition(0, foodY - Math.round(foodSize.h * 0.4), 0);
+                foodShadow.addComponent(UITransform).setContentSize(foodSize.w, 16);
                 const foodShade = foodShadow.addComponent(Graphics);
-                foodShade.fillColor = new Color(72, 54, 42, 130);
-                foodShade.ellipse(0, 0, layout.food * 0.38, 6);
+                foodShade.fillColor = new Color(72, 54, 42, 150);
+                foodShade.ellipse(0, 0, foodSize.w * 0.36, 5);
                 foodShade.fill();
                 tileNode.addChild(foodShadow);
                 const foodNode = this.addSprite(
                     tileNode,
                     'Food',
                     this.frameForFood(col[i]),
-                    layout.food,
-                    layout.food,
+                    foodSize.w,
+                    foodSize.h,
                     0,
                     foodY,
                     Color.WHITE,
@@ -1291,7 +1306,7 @@ export class GameController extends Component {
                 tileNode.on(Node.EventType.TOUCH_END, tap, this);
                 foodNode.on(Node.EventType.TOUCH_END, tap, this);
                 if (this.holdHint && this.holdHint.bagCol === c) {
-                    this.drawSageDashedRing(foodNode, layout.food + 12, layout.food + 12, 18, 'HintRing');
+                    this.drawSageDashedRing(foodNode, foodSize.w + 12, foodSize.h + 12, 18, 'HintRing');
                 }
             }
         }

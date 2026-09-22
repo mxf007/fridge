@@ -121,6 +121,7 @@ const UUID = {
     traySealed: '8085b3c5-21f0-4bcc-b990-c97f4c899dca@f9941',
     iconUndo: '73fbe16c-3f5c-4230-854b-1948ab7cf28f@f9941',
     iconHint: '9be83f96-829c-4c60-9e25-590aa93e4e46@f9941',
+    winPerfect: 'd1312f55-9340-4b85-ae10-2091d7f20031@f9941',
     builtin: '20835ba4-6145-4fbc-a58a-051ce700aa3e@f9941',
 };
 
@@ -175,6 +176,9 @@ export class GameController extends Component {
 
     @property({ type: SpriteFrame })
     iconHint: SpriteFrame | null = null;
+
+    @property({ type: SpriteFrame })
+    winPerfect: SpriteFrame | null = null;
 
     private board: BoardState | null = null;
     private playRoot: Node | null = null;
@@ -270,6 +274,7 @@ export class GameController extends Component {
         }
         if (!this.iconUndo) this.iconUndo = await loadFrame(UUID.iconUndo);
         if (!this.iconHint) this.iconHint = await loadFrame(UUID.iconHint);
+        if (!this.winPerfect) this.winPerfect = await loadFrame(UUID.winPerfect);
         if (!this.bgPlay) this.bgPlay = await loadFrame(UUID.bgPlay);
         if (!this.bgPlayWall) this.bgPlayWall = await loadFrame(UUID.bgPlayWall);
         if (!this.worktopTop) this.worktopTop = await loadFrame(UUID.worktopTop);
@@ -375,8 +380,13 @@ export class GameController extends Component {
         if (this.sizeTeach && !board.isWin()) this.drawSizeTeach(root);
 
         if (board.isWin() && !this.holdWin) {
-            this.addSprite(root, 'WinDim', this.builtin, size.w, size.h, 0, 0, new Color(61, 50, 41, 102));
-            this.addLabel(root, 'WinTitle', '今晚的冰箱收好了', 40, WALNUT, 640, 80).setPosition(0, 40, 0);
+            const size = this.canvasSize();
+            this.addSprite(root, 'WinDim', this.builtin, size.w, size.h, 0, 0, new Color(48, 48, 48, 178));
+            if (this.winPerfect) {
+                this.addWinPerfectStamp(root, 0, 80, 560);
+            } else {
+                this.addLabel(root, 'WinTitle', '完美收纳！', 40, new Color(248, 240, 220, 255), 640, 80).setPosition(0, 80, 0);
+            }
         }
     }
 
@@ -1860,7 +1870,7 @@ export class GameController extends Component {
             .start();
     }
 
-    /** 先亮成品冰箱，再压暗出卡：奖杯砸入、大字、步数、丝带落下、下一关弹出。 */
+    /** 先亮成品冰箱，再压暗出卡：奶油结算卡升起，步数与按钮依次弹出。 */
     private playWinReward() {
         const root = this.playRoot;
         const board = this.board;
@@ -1874,23 +1884,26 @@ export class GameController extends Component {
         this.spawnPrideFlash(root);
 
         this.scheduleOnce(() => {
-            const dim = this.addSprite(root, 'WinDim', this.builtin, 720, 1280, 0, 0, new Color(61, 50, 41, 255));
+            const size = this.canvasSize();
+            const dim = this.addSprite(
+                root,
+                'WinDim',
+                this.builtin,
+                size.w,
+                size.h,
+                0,
+                0,
+                new Color(48, 48, 48, 255),
+            );
             const dimOp = dim.addComponent(UIOpacity);
             dimOp.opacity = 0;
-            tween(dimOp).to(0.4, { opacity: 110 }, { easing: easing.quadOut }).start();
+            tween(dimOp).to(0.4, { opacity: 178 }, { easing: easing.quadOut }).start();
         }, 0.42);
 
         this.scheduleOnce(() => {
             this.spawnWinCard(root, board.steps);
-            this.spawnFallingRibbons(root);
-            this.raiseWinFx(root);
-        }, 0.62);
-
-        this.scheduleOnce(() => {
-            this.spawnNextLevelBtn(root);
-            this.spawnShareStepsBtn(root, board.steps);
             this.busy = false;
-        }, 2.05);
+        }, 0.62);
     }
 
     private pulseSealedFridge(root: Node) {
@@ -2002,89 +2015,271 @@ export class GameController extends Component {
     }
 
     private spawnWinCard(root: Node, steps: number) {
+        const size = this.canvasSize();
+        const wrap = new Node('WinPack');
+        wrap.layer = UI_2D;
+        wrap.setPosition(0, 0, 0);
+        wrap.addComponent(UITransform).setContentSize(size.w, size.h);
+        root.addChild(wrap);
+
+        // 标题图在蒙版之上、卡片之外；按原图像素等比，避免压扁
+        if (this.winPerfect) {
+            const stamp = this.addWinPerfectStamp(wrap, 0, 470, 560);
+            stamp.setScale(stamp.scale.x * 0.7, stamp.scale.y * 0.7, 1);
+            const stampOp = stamp.addComponent(UIOpacity);
+            stampOp.opacity = 0;
+            const s = stamp.scale.x / 0.7;
+            tween(stampOp).to(0.24, { opacity: 255 }).start();
+            tween(stamp)
+                .to(0.36, { scale: new Vec3(s * 1.04, s * 1.04, 1) }, { easing: easing.backOut })
+                .to(0.1, { scale: new Vec3(s, s, 1) })
+                .start();
+        } else {
+            const fallback = this.addLabel(wrap, 'WinStamp', '完美收纳！', 48, new Color(248, 240, 220, 255), 520, 58);
+            fallback.setPosition(0, 470, 0);
+        }
+
+        const cardW = 560;
+        const cardH = 760;
         const card = new Node('WinCard');
         card.layer = UI_2D;
-        card.setPosition(0, -220, 0);
-        card.setScale(0.78, 0.78, 1);
-        card.addComponent(UITransform).setContentSize(600, 520);
+        card.setPosition(0, -48, 0);
+        card.setScale(0.82, 0.82, 1);
+        card.addComponent(UITransform).setContentSize(cardW, cardH);
         const cg = card.addComponent(Graphics);
-        cg.fillColor = CREAM;
-        cg.roundRect(-300, -260, 600, 520, 36);
+        cg.fillColor = new Color(61, 50, 41, 36);
+        cg.roundRect(-cardW / 2 + 8, -cardH / 2 - 12, cardW, cardH, 40);
         cg.fill();
-        cg.lineWidth = 3;
-        cg.strokeColor = new Color(107, 74, 58, 50);
-        cg.roundRect(-300, -260, 600, 520, 36);
-        cg.stroke();
+        cg.fillColor = new Color(255, 249, 239, 255);
+        cg.roundRect(-cardW / 2, -cardH / 2, cardW, cardH, 40);
+        cg.fill();
         const cardOp = card.addComponent(UIOpacity);
         cardOp.opacity = 0;
-        root.addChild(card);
+        wrap.addChild(card);
 
+        // 沿用旧奖杯冰箱，略缩小
         const trophy = this.makeTrophyFridge();
-        trophy.setPosition(0, 155, 0);
-        trophy.setScale(0.15, 0.15, 1);
+        trophy.setPosition(0, 232, 0);
+        trophy.setScale(0.12, 0.12, 1);
         card.addChild(trophy);
 
-        const sub = this.addLabel(card, 'WinSub', '今晚的冰箱', 26, FRAME, 500, 36);
-        sub.setPosition(0, 28, 0);
-        sub.setScale(0, 0, 1);
-        const title = this.addLabel(card, 'WinTitle', '收好了', 52, WALNUT, 500, 64);
-        title.setPosition(0, -28, 0);
-        title.setScale(0, 0, 1);
+        const status = this.addLabel(card, 'WinStatus', '今晚冰箱收好了', 30, WALNUT, 480, 40);
+        status.setPosition(0, 78, 0);
+        status.setScale(0, 0, 1);
 
-        const stepsNode = this.addLabel(card, 'WinSteps', `${steps} 步`, 72, CORAL, 480, 88);
-        stepsNode.setPosition(0, -110, 0);
+        const stepsNode = new Node('WinSteps');
+        stepsNode.layer = UI_2D;
+        stepsNode.setPosition(0, -20, 0);
         stepsNode.setScale(0, 0, 1);
+        stepsNode.addComponent(UITransform).setContentSize(500, 120);
+        card.addChild(stepsNode);
+        const stepSize = 108;
+        const unitSize = Math.round(stepSize * 0.5);
+        const digits = String(steps).length;
+        const numW = Math.max(unitSize, digits * Math.round(stepSize * 0.62));
+        const unitW = unitSize + 8;
+        const gap = 6;
+        const totalW = numW + gap + unitW;
+        const stepNum = this.addLabel(stepsNode, 'Num', `${steps}`, stepSize, CORAL, numW + 20, 120);
+        const stepUnit = this.addLabel(stepsNode, 'Unit', '步', unitSize, CORAL, unitW, 64);
+        stepNum.setPosition(-totalW / 2 + numW / 2, 0, 0);
+        stepUnit.setPosition(totalW / 2 - unitW / 2, -Math.round(stepSize * 0.16), 0);
+        this.drawSpark(card, -132, 12, 10, WHEAT);
+        this.drawSpark(card, 142, -40, 9, WHEAT);
+        this.drawSpark(card, 118, 18, 7, new Color(255, 210, 140, 255));
 
-        const chip = new Node('AlbumChip');
-        chip.layer = UI_2D;
-        chip.setPosition(0, -188, 0);
-        chip.setScale(0, 0, 1);
-        chip.angle = -14;
-        chip.addComponent(UITransform).setContentSize(240, 52);
-        const chg = chip.addComponent(Graphics);
-        chg.fillColor = MILK;
-        chg.roundRect(-120, -26, 240, 52, 26);
-        chg.fill();
-        chg.lineWidth = 3;
-        chg.strokeColor = CORAL;
-        chg.roundRect(-120, -26, 240, 52, 26);
-        chg.stroke();
-        this.addLabel(chip, 'ChipText', '图鉴 +1', 26, WALNUT, 220, 36);
-        card.addChild(chip);
+        const nextBtn = this.makeWinPrimaryBtn(card, 'BtnNext', '下一关  >', 0, -168);
+        nextBtn.setScale(0, 0, 1);
+        const shareBtn = this.makeWinSecondaryBtn(card, 'BtnShareSteps', '分享步数', 0, -268);
+        shareBtn.setScale(0, 0, 1);
 
-        tween(cardOp).to(0.2, { opacity: 255 }).start();
+        const badge = this.makeWinAlbumBadge();
+        badge.setPosition(0, -350, 0);
+        badge.setScale(0, 0, 1);
+        card.addChild(badge);
+
+        tween(cardOp).to(0.22, { opacity: 255 }).start();
         tween(card)
-            .to(0.42, { position: new Vec3(0, 56, 0), scale: new Vec3(1.05, 1.05, 1) }, { easing: easing.backOut })
+            .to(0.4, { position: new Vec3(0, -28, 0), scale: new Vec3(1.03, 1.03, 1) }, { easing: easing.backOut })
             .to(0.12, { scale: new Vec3(1, 1, 1) })
             .start();
 
         this.scheduleOnce(() => {
             tween(trophy)
-                .to(0.32, { scale: new Vec3(1.16, 1.16, 1) }, { easing: easing.backOut })
-                .to(0.1, { scale: new Vec3(1, 1, 1) })
+                .to(0.32, { scale: new Vec3(0.78, 0.78, 1) }, { easing: easing.backOut })
+                .to(0.1, { scale: new Vec3(0.7, 0.7, 1) })
                 .start();
-            this.spawnStarBurst(this.ensureWinFx(root));
-            this.raiseWinFx(root);
-        }, 0.18);
+        }, 0.16);
         this.scheduleOnce(() => {
-            tween(sub).to(0.2, { scale: new Vec3(1, 1, 1) }, { easing: easing.backOut }).start();
-            tween(title)
-                .to(0.28, { scale: new Vec3(1.12, 1.12, 1) }, { easing: easing.backOut })
-                .to(0.1, { scale: new Vec3(1, 1, 1) })
-                .start();
-        }, 0.42);
+            tween(status).to(0.22, { scale: new Vec3(1, 1, 1) }, { easing: easing.backOut }).start();
+        }, 0.34);
         this.scheduleOnce(() => {
             tween(stepsNode)
-                .to(0.28, { scale: new Vec3(1.18, 1.18, 1) }, { easing: easing.backOut })
-                .to(0.12, { scale: new Vec3(1, 1, 1) })
-                .start();
-        }, 0.72);
-        this.scheduleOnce(() => {
-            tween(chip)
-                .to(0.28, { scale: new Vec3(1.1, 1.1, 1), angle: 0 }, { easing: easing.backOut })
+                .to(0.3, { scale: new Vec3(1.12, 1.12, 1) }, { easing: easing.backOut })
                 .to(0.1, { scale: new Vec3(1, 1, 1) })
                 .start();
-        }, 0.98);
+        }, 0.48);
+        this.scheduleOnce(() => {
+            tween(nextBtn)
+                .to(0.28, { scale: new Vec3(1.06, 1.06, 1) }, { easing: easing.backOut })
+                .to(0.1, { scale: new Vec3(1, 1, 1) })
+                .start();
+        }, 0.66);
+        this.scheduleOnce(() => {
+            tween(shareBtn)
+                .to(0.26, { scale: new Vec3(1.04, 1.04, 1) }, { easing: easing.backOut })
+                .to(0.1, { scale: new Vec3(1, 1, 1) })
+                .start();
+        }, 0.78);
+        this.scheduleOnce(() => {
+            tween(badge)
+                .to(0.28, { scale: new Vec3(1.08, 1.08, 1) }, { easing: easing.backOut })
+                .to(0.1, { scale: new Vec3(1, 1, 1) })
+                .start();
+        }, 0.92);
+
+        const fromId = this.board ? this.board.level.id : 1;
+        this.bindHudPress(nextBtn, () => {
+            const next = this.nextPlayable(fromId);
+            if (!next) {
+                this.showToast('下一关还没收拾');
+                return;
+            }
+            this.startLevel(next);
+        });
+        this.bindHudPress(shareBtn, () => {
+            this.showToast(`我把今晚的冰箱收好了，用了 ${steps} 步`);
+        });
+    }
+
+    private drawSpark(parent: Node, x: number, y: number, r: number, color: Color) {
+        const n = new Node('Spark');
+        n.layer = UI_2D;
+        n.setPosition(x, y, 0);
+        n.addComponent(UITransform).setContentSize(r * 2, r * 2);
+        const g = n.addComponent(Graphics);
+        g.fillColor = color;
+        g.moveTo(0, r);
+        g.lineTo(r * 0.22, r * 0.22);
+        g.lineTo(r, 0);
+        g.lineTo(r * 0.22, -r * 0.22);
+        g.lineTo(0, -r);
+        g.lineTo(-r * 0.22, -r * 0.22);
+        g.lineTo(-r, 0);
+        g.lineTo(-r * 0.22, r * 0.22);
+        g.close();
+        g.fill();
+        parent.addChild(n);
+    }
+
+    private makeWinPrimaryBtn(parent: Node, name: string, text: string, x: number, y: number): Node {
+        const btn = new Node(name);
+        btn.layer = UI_2D;
+        btn.setPosition(x, y, 0);
+        btn.addComponent(UITransform).setContentSize(420, 88);
+        const g = btn.addComponent(Graphics);
+        g.fillColor = CORAL;
+        g.roundRect(-210, -44, 420, 88, 44);
+        g.fill();
+        this.addLabel(btn, 'Label', text, 34, MILK, 380, 48);
+        parent.addChild(btn);
+        return btn;
+    }
+
+    private makeWinSecondaryBtn(parent: Node, name: string, text: string, x: number, y: number): Node {
+        const btn = new Node(name);
+        btn.layer = UI_2D;
+        btn.setPosition(x, y, 0);
+        btn.addComponent(UITransform).setContentSize(420, 80);
+        const g = btn.addComponent(Graphics);
+        g.fillColor = MILK;
+        g.roundRect(-210, -40, 420, 80, 40);
+        g.fill();
+        g.lineWidth = 3;
+        g.strokeColor = new Color(107, 74, 58, 90);
+        g.roundRect(-210, -40, 420, 80, 40);
+        g.stroke();
+        const shareIcon = new Node('ShareIcon');
+        shareIcon.layer = UI_2D;
+        shareIcon.setPosition(-78, 0, 0);
+        shareIcon.addComponent(UITransform).setContentSize(28, 28);
+        const ig = shareIcon.addComponent(Graphics);
+        ig.fillColor = WALNUT;
+        ig.circle(-6, 8, 4);
+        ig.fill();
+        ig.circle(8, 0, 4);
+        ig.fill();
+        ig.circle(-6, -8, 4);
+        ig.fill();
+        ig.lineWidth = 3;
+        ig.strokeColor = WALNUT;
+        ig.moveTo(-6, 8);
+        ig.lineTo(8, 0);
+        ig.moveTo(-6, -8);
+        ig.lineTo(8, 0);
+        ig.stroke();
+        btn.addChild(shareIcon);
+        this.addLabel(btn, 'Label', text, 30, WALNUT, 280, 44).setPosition(18, 0, 0);
+        parent.addChild(btn);
+        return btn;
+    }
+
+    private makeWinAlbumBadge(): Node {
+        const chip = new Node('AlbumChip');
+        chip.layer = UI_2D;
+        chip.addComponent(UITransform).setContentSize(220, 56);
+        const chg = chip.addComponent(Graphics);
+        chg.fillColor = new Color(255, 252, 246, 255);
+        chg.roundRect(-110, -28, 220, 56, 14);
+        chg.fill();
+        chg.fillColor = new Color(176, 130, 96, 170);
+        const dash = 7;
+        const gap = 5;
+        for (let x = -96; x < 96; x += dash + gap) {
+            chg.rect(x, 24, dash, 2);
+            chg.rect(x, -26, dash, 2);
+            chg.fill();
+        }
+        for (let y = -16; y < 16; y += dash + gap) {
+            chg.rect(-108, y, 2, dash);
+            chg.rect(106, y, 2, dash);
+            chg.fill();
+        }
+
+        const leaf = new Node('Leaf');
+        leaf.layer = UI_2D;
+        leaf.setPosition(-72, 0, 0);
+        leaf.addComponent(UITransform).setContentSize(28, 28);
+        const lg = leaf.addComponent(Graphics);
+        lg.fillColor = FRAME;
+        lg.ellipse(0, 0, 10, 14);
+        lg.fill();
+        lg.strokeColor = WALNUT;
+        lg.lineWidth = 2;
+        lg.moveTo(0, -12);
+        lg.lineTo(0, 10);
+        lg.stroke();
+        chip.addChild(leaf);
+
+        this.addLabel(chip, 'ChipText', '图鉴 +1', 26, WALNUT, 120, 36).setPosition(4, 0, 0);
+
+        const plus = new Node('Plus');
+        plus.layer = UI_2D;
+        plus.setPosition(78, 0, 0);
+        plus.addComponent(UITransform).setContentSize(28, 28);
+        const pg = plus.addComponent(Graphics);
+        pg.fillColor = CORAL;
+        pg.circle(0, 0, 12);
+        pg.fill();
+        pg.strokeColor = MILK;
+        pg.lineWidth = 3;
+        pg.moveTo(-6, 0);
+        pg.lineTo(6, 0);
+        pg.moveTo(0, -6);
+        pg.lineTo(0, 6);
+        pg.stroke();
+        chip.addChild(plus);
+        return chip;
     }
 
     private makeTrophyFridge(): Node {
@@ -2213,80 +2408,6 @@ export class GameController extends Component {
         }
         g.close();
         g.fill();
-    }
-
-    private spawnNextLevelBtn(root: Node) {
-        const old = root.getChildByName('BtnNext');
-        if (old) old.destroy();
-
-        const btn = new Node('BtnNext');
-        btn.layer = UI_2D;
-        btn.setPosition(0, -460, 0);
-        btn.setScale(0.55, 0.55, 1);
-        btn.addComponent(UITransform).setContentSize(520, 96);
-        const g = btn.addComponent(Graphics);
-        g.fillColor = CORAL;
-        g.roundRect(-260, -48, 520, 96, 48);
-        g.fill();
-        this.addLabel(btn, 'NextLabel', '下一关', 36, MILK, 480, 52);
-        const op = btn.addComponent(UIOpacity);
-        op.opacity = 0;
-        root.addChild(btn);
-
-        tween(op).to(0.18, { opacity: 255 }).start();
-        tween(btn)
-            .to(0.38, { position: new Vec3(0, -330, 0), scale: new Vec3(1.1, 1.1, 1) }, { easing: easing.backOut })
-            .to(0.12, { scale: new Vec3(1, 1, 1) })
-            .start();
-
-        const fromId = this.board ? this.board.level.id : 1;
-        btn.on(Node.EventType.TOUCH_START, () => {
-            tween(btn).to(0.08, { scale: new Vec3(0.97, 0.97, 1) }).start();
-        }, this);
-        btn.on(Node.EventType.TOUCH_CANCEL, () => {
-            tween(btn).to(0.08, { scale: new Vec3(1, 1, 1) }).start();
-        }, this);
-        btn.on(Node.EventType.TOUCH_END, () => {
-            tween(btn).to(0.08, { scale: new Vec3(1, 1, 1) }).start();
-            const next = this.nextPlayable(fromId);
-            if (!next) {
-                this.showToast('下一关还没收拾');
-                return;
-            }
-            this.startLevel(next);
-        }, this);
-    }
-
-    private spawnShareStepsBtn(root: Node, steps: number) {
-        const id = this.board ? this.board.level.id : 0;
-        if (id !== 15 && id !== 25 && id !== 30) return;
-        const old = root.getChildByName('BtnShareSteps');
-        if (old) old.destroy();
-
-        const btn = new Node('BtnShareSteps');
-        btn.layer = UI_2D;
-        btn.setPosition(0, -430, 0);
-        btn.setScale(0.55, 0.55, 1);
-        btn.addComponent(UITransform).setContentSize(520, 80);
-        const g = btn.addComponent(Graphics);
-        g.fillColor = SAGE;
-        g.roundRect(-260, -40, 520, 80, 40);
-        g.fill();
-        this.addLabel(btn, 'ShareLabel', '分享步数', 32, MILK, 480, 48);
-        const op = btn.addComponent(UIOpacity);
-        op.opacity = 0;
-        root.addChild(btn);
-
-        tween(op).delay(0.12).to(0.18, { opacity: 255 }).start();
-        tween(btn)
-            .delay(0.12)
-            .to(0.34, { position: new Vec3(0, -430, 0), scale: new Vec3(1.06, 1.06, 1) }, { easing: easing.backOut })
-            .to(0.1, { scale: new Vec3(1, 1, 1) })
-            .start();
-
-        this.bindHudPress(btn, () => {
-            this.showToast(`我把今晚的冰箱收好了，用了 ${steps} 步`);
-        });
     }
 
     private showPlaceFail(result: PlaceFail) {
@@ -2446,6 +2567,30 @@ export class GameController extends Component {
         this.scheduleOnce(() => {
             if (n.isValid) n.destroy();
         }, 1.2);
+    }
+
+    /** 完美收纳标题：按贴图原比例等比缩放，不写死宽高以免压瘪。 */
+    private addWinPerfectStamp(parent: Node, x: number, y: number, targetW: number): Node {
+        const frame = this.winPerfect || this.builtin;
+        const node = new Node('WinStamp');
+        node.layer = UI_2D;
+        node.setPosition(x, y, 0);
+        const ui = node.addComponent(UITransform);
+        const sp = node.addComponent(Sprite);
+        sp.sizeMode = Sprite.SizeMode.RAW;
+        sp.color = Color.WHITE;
+        if (frame) sp.spriteFrame = frame;
+        parent.addChild(node);
+        const srcW = frame && frame.originalSize ? frame.originalSize.width : 412;
+        const scale = targetW / Math.max(srcW, 1);
+        node.setScale(scale, scale, 1);
+        // RAW 后 contentSize 跟贴图走；显式再同步一次，避免首帧为空
+        if (frame) {
+            const ow = frame.originalSize.width;
+            const oh = frame.originalSize.height;
+            ui.setContentSize(ow, oh);
+        }
+        return node;
     }
 
     private addSprite(

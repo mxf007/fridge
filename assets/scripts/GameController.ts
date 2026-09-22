@@ -331,9 +331,17 @@ export class GameController extends Component {
         if (this.playRoot && this.playRoot.isValid) return;
         const root = new Node('PlayRoot');
         root.layer = UI_2D;
-        root.addComponent(UITransform).setContentSize(720, 1280);
+        const size = this.canvasSize();
+        root.addComponent(UITransform).setContentSize(size.w, size.h);
         this.node.addChild(root);
         this.playRoot = root;
+    }
+
+    private canvasSize(): { w: number; h: number } {
+        const ui = this.node.getComponent(UITransform);
+        if (ui && ui.width > 0 && ui.height > 0) return { w: ui.width, h: ui.height };
+        const vis = view.getVisibleSize();
+        return { w: vis.width || 720, h: vis.height || 1280 };
     }
 
     private render() {
@@ -342,18 +350,23 @@ export class GameController extends Component {
         if (!root || !board) return;
         root.removeAllChildren();
 
+        const size = this.canvasSize();
+        const rootUi = root.getComponent(UITransform);
+        if (rootUi) rootUi.setContentSize(size.w, size.h);
+
         const wall = this.bgPlay || this.bgPlayWall;
-        this.addSprite(root, 'PlayBgWall', wall || this.builtin, 720, 1280, 0, 0, wall ? Color.WHITE : CREAM);
+        this.addSprite(root, 'PlayBgWall', wall || this.builtin, size.w, size.h, 0, 0, wall ? Color.WHITE : CREAM);
         this.drawTrays(root, board);
-        this.drawWorktopBack(root);
+        /** bg_play 已含台面，再叠 worktop 会盖住下半截。只用墙图时才补台面层。 */
+        if (!this.bgPlay) this.drawWorktopBack(root);
         this.drawBags(root, board);
-        this.drawWorktopFront(root);
+        if (!this.bgPlay) this.drawWorktopFront(root);
         this.drawBuffer(root, board);
         this.drawHud(root);
         if (this.sizeTeach && !board.isWin()) this.drawSizeTeach(root);
 
         if (board.isWin() && !this.holdWin) {
-            this.addSprite(root, 'WinDim', this.builtin, 720, 1280, 0, 0, new Color(61, 50, 41, 102));
+            this.addSprite(root, 'WinDim', this.builtin, size.w, size.h, 0, 0, new Color(61, 50, 41, 102));
             this.addLabel(root, 'WinTitle', '今晚的冰箱收好了', 40, WALNUT, 640, 80).setPosition(0, 40, 0);
         }
     }

@@ -109,6 +109,9 @@ const UUID = {
     bgPlayWall: 'd1012f55-9340-4b85-ae10-2091d7f20001@f9941',
     worktopTop: 'd1022f55-9340-4b85-ae10-2091d7f20002@f9941',
     worktopFront: 'd1032f55-9340-4b85-ae10-2091d7f20003@f9941',
+    propBoard: 'd1202f55-9340-4b85-ae10-2091d7f20020@f9941',
+    propCup: 'd1202f55-9340-4b85-ae10-2091d7f20021@f9941',
+    propCloth: 'd1202f55-9340-4b85-ae10-2091d7f20022@f9941',
     bagHidden: 'd1052f55-9340-4b85-ae10-2091d7f20005@f9941',
     bagTrayLip: 'd1132f55-9340-4b85-ae10-2091d7f20013@f9941',
     bagTrayLower: 'd1142f55-9340-4b85-ae10-2091d7f20014@f9941',
@@ -180,6 +183,9 @@ export class GameController extends Component {
     private bgPlayWall: SpriteFrame | null = null;
     private worktopTop: SpriteFrame | null = null;
     private worktopFront: SpriteFrame | null = null;
+    private propBoard: SpriteFrame | null = null;
+    private propCup: SpriteFrame | null = null;
+    private propCloth: SpriteFrame | null = null;
     private bagHidden: SpriteFrame | null = null;
     private bagTrayLip: SpriteFrame | null = null;
     private bagTrayLower: SpriteFrame | null = null;
@@ -268,6 +274,9 @@ export class GameController extends Component {
         if (!this.bgPlayWall) this.bgPlayWall = await loadFrame(UUID.bgPlayWall);
         if (!this.worktopTop) this.worktopTop = await loadFrame(UUID.worktopTop);
         if (!this.worktopFront) this.worktopFront = await loadFrame(UUID.worktopFront);
+        if (!this.propBoard) this.propBoard = await loadFrame(UUID.propBoard);
+        if (!this.propCup) this.propCup = await loadFrame(UUID.propCup);
+        if (!this.propCloth) this.propCloth = await loadFrame(UUID.propCloth);
         if (!this.bagHidden) this.bagHidden = await loadFrame(UUID.bagHidden);
         if (!this.bagTrayLip) this.bagTrayLip = await loadFrame(UUID.bagTrayLip);
         if (!this.bagTrayLower) this.bagTrayLower = await loadFrame(UUID.bagTrayLower);
@@ -357,10 +366,10 @@ export class GameController extends Component {
         const wall = this.bgPlay || this.bgPlayWall;
         this.addSprite(root, 'PlayBgWall', wall || this.builtin, size.w, size.h, 0, 0, wall ? Color.WHITE : CREAM);
         this.drawTrays(root, board);
-        /** bg_play 已含台面，再叠 worktop 会盖住下半截。只用墙图时才补台面层。 */
-        if (!this.bgPlay) this.drawWorktopBack(root);
+        this.drawWorktopBack(root);
+        this.drawMidProps(root);
         this.drawBags(root, board);
-        if (!this.bgPlay) this.drawWorktopFront(root);
+        this.drawWorktopFront(root);
         this.drawBuffer(root, board);
         this.drawHud(root);
         if (this.sizeTeach && !board.isWin()) this.drawSizeTeach(root);
@@ -589,6 +598,7 @@ export class GameController extends Component {
         return Y_TRAY;
     }
 
+    /** 胡桃木色外框 + 冷光内腔；收满后灰门合上。 */
     private trayMetrics(cap: number) {
         const n = this.board ? this.board.trays.length : 2;
         const mixed = !!(this.board && this.board.trays.some((t) => t.cap !== this.board!.trays[0].cap));
@@ -601,7 +611,6 @@ export class GameController extends Component {
         return { slotW, slotH, frame, outerW: slotW + frame * 2, outerH: slotH + frame * 2, cap };
     }
 
-    /** 昨晚最终版槽位：胡桃/木色外框 + 冷光内腔；收满后灰门合上。 */
     private drawTrays(root: Node, board: BoardState) {
         const n = board.trays.length;
         const gap = n >= 4 ? 12 : 24;
@@ -1130,12 +1139,25 @@ export class GameController extends Component {
         return anchor;
     }
 
-    /** 工作台顶面比屏幕宽。左右出屏，只露出托盘这一段。 */
+    /** 冰箱与叠盘之间的空档：左右摆低对比厨房小物件，不挡点击、不挡飞行。 */
+    private drawMidProps(root: Node) {
+        const dim = new Color(255, 255, 255, 220);
+        const y = -80;
+        if (this.propBoard) {
+            this.addSprite(root, 'PropBoard', this.propBoard, 150, 84, -248, y - 8, dim);
+        }
+        if (this.propCloth) {
+            this.addSprite(root, 'PropCloth', this.propCloth, 118, 92, 248, y - 4, dim);
+        }
+        if (this.propCup) {
+            this.addSprite(root, 'PropCup', this.propCup, 78, 66, 268, y + 36, dim);
+        }
+    }
+
+    /** 工作台顶面托住叠盘；按设计宽，不再放大出屏。 */
     private drawWorktopBack(root: Node) {
         if (this.worktopTop) {
-            const w = 1480;
-            const h = Math.round(w * (380 / 720));
-            this.addSprite(root, 'WorktopTop', this.worktopTop, w, h, 0, -210, Color.WHITE);
+            this.addSprite(root, 'WorktopTop', this.worktopTop, 720, 380, 0, -300, Color.WHITE);
             return;
         }
         const top = new Node('WorktopTop');
@@ -1153,10 +1175,10 @@ export class GameController extends Component {
         root.addChild(top);
     }
 
-    /** 工作台前立面跟台面同宽，上沿停在托盘底边下面。 */
+    /** 工作台前立面跟顶面同宽。 */
     private drawWorktopFront(root: Node) {
         if (this.worktopFront) {
-            this.addSprite(root, 'WorktopFront', this.worktopFront, 1480, 160, 0, -460, Color.WHITE);
+            this.addSprite(root, 'WorktopFront', this.worktopFront, 720, 120, 0, -448, Color.WHITE);
             return;
         }
         const front = new Node('WorktopFront');

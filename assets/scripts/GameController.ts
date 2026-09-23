@@ -143,10 +143,14 @@ const UUID = {
     iconUndo: '73fbe16c-3f5c-4230-854b-1948ab7cf28f@f9941',
     iconHint: '9be83f96-829c-4c60-9e25-590aa93e4e46@f9941',
     winPerfect: 'd1312f55-9340-4b85-ae10-2091d7f20031@f9941',
+    shareWin: 'd1402f55-9340-4b85-ae10-2091d7f20040@f9941',
+    shareMilestone: 'd1412f55-9340-4b85-ae10-2091d7f20041@f9941',
     builtin: '20835ba4-6145-4fbc-a58a-051ce700aa3e@f9941',
 };
 
-const HOME_NODES = ['Bg', 'Title', 'BtnStart', 'AlbumLink', 'HomeBarMask'];
+const HOME_NODES = ['Bg', 'Title', 'BtnStart', 'AlbumLink', 'HomeBarMask', 'BtnSettings'];
+const SOUND_KEY = 'fridge_sound';
+const VIBRATE_KEY = 'fridge_vibrate';
 const PLAYABLE: LevelDef[] = [LEVEL_01, LEVEL_02, LEVEL_03, LEVEL_04, LEVEL_05, LEVEL_06, LEVEL_07, LEVEL_08, LEVEL_09, LEVEL_10, LEVEL_11, LEVEL_12, LEVEL_13, LEVEL_14, LEVEL_15, LEVEL_16, LEVEL_17, LEVEL_18, LEVEL_19, LEVEL_20, LEVEL_21, LEVEL_22, LEVEL_23, LEVEL_24, LEVEL_25, LEVEL_26, LEVEL_27, LEVEL_28, LEVEL_29, LEVEL_30];
 const CLEARED_KEY = 'fridge_cleared';
 const MILESTONE_KEY = (n: number) => `fridge_milestone_${n}`;
@@ -208,6 +212,12 @@ export class GameController extends Component {
 
     @property({ type: SpriteFrame })
     winPerfect: SpriteFrame | null = null;
+
+    @property({ type: SpriteFrame })
+    shareWin: SpriteFrame | null = null;
+
+    @property({ type: SpriteFrame })
+    shareMilestone: SpriteFrame | null = null;
 
     private board: BoardState | null = null;
     private playRoot: Node | null = null;
@@ -285,6 +295,7 @@ export class GameController extends Component {
         const btn = this.node.getChildByName('BtnStart');
         if (!btn) return;
         if (!btn.getComponent(Button)) btn.addComponent(Button);
+        btn.off(Node.EventType.TOUCH_END);
         btn.on(Node.EventType.TOUCH_END, () => this.startLevel(this.continueLevel()), this);
         const album = this.node.getChildByName('AlbumLink');
         if (album) {
@@ -292,7 +303,128 @@ export class GameController extends Component {
             album.off(Node.EventType.TOUCH_END);
             album.on(Node.EventType.TOUCH_END, () => this.openAlbum(), this);
         }
+        this.polishHomeChrome();
         this.refreshAlbumLink();
+    }
+
+    /** §6.1：主页叠在 bg_home 成品图上——热区透明，设置仅音效/震动。 */
+    private polishHomeChrome() {
+        const btn = this.node.getChildByName('BtnStart');
+        if (btn) {
+            const sp = btn.getComponent(Sprite);
+            if (sp) sp.color = new Color(255, 255, 255, 0);
+            const label = btn.getChildByName('Label');
+            if (label) label.active = false;
+            const btnUi = btn.getComponent(UITransform);
+            if (btnUi) btnUi.setContentSize(560, 100);
+            btn.setPosition(0, -420, 0);
+        }
+        const album = this.node.getChildByName('AlbumLink');
+        if (album) {
+            const label = album.getComponent(Label) || album.getComponentInChildren(Label);
+            if (label) {
+                label.color = SAGE;
+                label.fontSize = 28;
+            }
+            album.setPosition(0, -548, 0);
+        }
+        this.ensureHomeSettings();
+    }
+
+    private ensureHomeSettings() {
+        let gear = this.node.getChildByName('BtnSettings');
+        if (!gear) {
+            gear = new Node('BtnSettings');
+            gear.layer = UI_2D;
+            gear.addComponent(UITransform).setContentSize(72, 72);
+            const g = gear.addComponent(Graphics);
+            g.fillColor = MILK;
+            g.circle(0, 0, 30);
+            g.fill();
+            g.lineWidth = 4;
+            g.strokeColor = WALNUT;
+            g.circle(0, 0, 12);
+            g.stroke();
+            g.circle(0, 0, 22);
+            g.stroke();
+            this.node.addChild(gear);
+        }
+        gear.setPosition(300, 560, 0);
+        gear.active = true;
+        gear.off(Node.EventType.TOUCH_END);
+        this.bindHudPress(gear, () => this.openSettings());
+    }
+
+    private soundOn(): boolean {
+        const raw = sys.localStorage.getItem(SOUND_KEY);
+        return raw !== '0';
+    }
+
+    private vibrateOn(): boolean {
+        const raw = sys.localStorage.getItem(VIBRATE_KEY);
+        return raw !== '0';
+    }
+
+    private openSettings() {
+        const old = this.node.getChildByName('SettingsLayer');
+        if (old) old.destroy();
+        const size = this.canvasSize();
+        const layer = new Node('SettingsLayer');
+        layer.layer = UI_2D;
+        layer.addComponent(UITransform).setContentSize(size.w, size.h);
+        this.node.addChild(layer);
+        const dim = this.addSprite(layer, 'Dim', this.builtin, size.w, size.h, 0, 0, new Color(61, 50, 41, 140));
+        dim.on(Node.EventType.TOUCH_END, () => {
+            if (layer.isValid) layer.destroy();
+        }, this);
+
+        const card = new Node('Card');
+        card.layer = UI_2D;
+        card.setPosition(0, 40, 0);
+        card.addComponent(UITransform).setContentSize(520, 360);
+        const cg = card.addComponent(Graphics);
+        cg.fillColor = CREAM;
+        cg.roundRect(-260, -180, 520, 360, 28);
+        cg.fill();
+        layer.addChild(card);
+        card.on(Node.EventType.TOUCH_END, () => {}, this);
+
+        this.addLabel(card, 'Title', '设置', 36, WALNUT, 400, 48).setPosition(0, 120, 0);
+        this.addLabel(card, 'Hint', '仅音效与震动，没有背景音乐', 22, FRAME, 440, 36).setPosition(0, 70, 0);
+
+        const row = (name: string, y: number, on: boolean, toggle: () => void) => {
+            const btn = new Node(name);
+            btn.layer = UI_2D;
+            btn.setPosition(0, y, 0);
+            btn.addComponent(UITransform).setContentSize(420, 72);
+            const g = btn.addComponent(Graphics);
+            g.fillColor = MILK;
+            g.roundRect(-210, -36, 420, 72, 20);
+            g.fill();
+            g.lineWidth = 3;
+            g.strokeColor = on ? SAGE : FRAME;
+            g.roundRect(-210, -36, 420, 72, 20);
+            g.stroke();
+            this.addLabel(btn, 'Txt', `${name === 'Sound' ? '音效' : '震动'}  ${on ? '开' : '关'}`, 28, WALNUT, 360, 40);
+            card.addChild(btn);
+            this.bindHudPress(btn, () => {
+                toggle();
+                if (layer.isValid) layer.destroy();
+                this.openSettings();
+            });
+        };
+        row('Sound', 0, this.soundOn(), () => {
+            sys.localStorage.setItem(SOUND_KEY, this.soundOn() ? '0' : '1');
+        });
+        row('Vibrate', -90, this.vibrateOn(), () => {
+            sys.localStorage.setItem(VIBRATE_KEY, this.vibrateOn() ? '0' : '1');
+        });
+
+        const close = this.addLabel(card, 'Close', '好的', 28, SAGE, 160, 40);
+        close.setPosition(0, -140, 0);
+        this.bindHudPress(close, () => {
+            if (layer.isValid) layer.destroy();
+        });
     }
 
     private refreshAlbumLink() {
@@ -332,6 +464,7 @@ export class GameController extends Component {
         this.addLabel(panel, 'Title', '我收过的冰箱', 36, WALNUT, 560, 48).setPosition(0, 430, 0);
         const cleared = this.clearedId();
         this.addLabel(panel, 'Progress', `${cleared} / 30`, 26, SAGE, 200, 36).setPosition(0, 380, 0);
+        this.addLabel(panel, 'ReplayHint', '点卡片再收一次 · 长按分享', 20, FRAME, 480, 28).setPosition(0, 348, 0);
 
         const cols = 3;
         const cardW = 168;
@@ -344,7 +477,7 @@ export class GameController extends Component {
         const contentH = maxShow > 0 ? rows * pitch - gapY : 0;
 
         const viewW = 600;
-        const viewH = 720;
+        const viewH = 680;
         const viewport = new Node('Viewport');
         viewport.layer = UI_2D;
         viewport.setPosition(0, -40, 0);
@@ -429,19 +562,7 @@ export class GameController extends Component {
         g.stroke();
         parent.addChild(card);
 
-        const thumb = new Node('Thumb');
-        thumb.layer = UI_2D;
-        thumb.setPosition(0, 18, 0);
-        thumb.addComponent(UITransform).setContentSize(96, 72);
-        const tg = thumb.addComponent(Graphics);
-        tg.fillColor = FRIDGE_GLOW;
-        tg.roundRect(-48, -36, 96, 72, 12);
-        tg.fill();
-        tg.lineWidth = 3;
-        tg.strokeColor = WALNUT;
-        tg.roundRect(-48, -36, 96, 72, 12);
-        tg.stroke();
-        card.addChild(thumb);
+        this.paintAlbumFridgeThumb(card, levelId);
 
         this.addLabel(card, 'Lv', `第 ${levelId} 关`, 22, WALNUT, 140, 28).setPosition(0, -42, 0);
 
@@ -459,11 +580,17 @@ export class GameController extends Component {
         const onShare = () => {
             if (shared || scrolling) return;
             shared = true;
-            const tip = this.addLabel(this.node, 'AlbumShareToast', `第 ${levelId} 关我的冰箱`, 24, WALNUT, 560, 44);
-            tip.setPosition(0, -300, 0);
-            this.scheduleOnce(() => {
-                if (tip.isValid) tip.destroy();
-            }, 1.2);
+            this.showSharePreview(`第 ${levelId} 关我的冰箱`);
+        };
+        const replay = () => {
+            const level = this.nextPlayable(levelId - 1);
+            if (!level || level.id !== levelId) {
+                this.showToast('这一关还没收拾');
+                return;
+            }
+            const layer = this.node.getChildByName('AlbumLayer');
+            if (layer && layer.isValid) layer.destroy();
+            this.startLevel(level);
         };
         card.on(Node.EventType.TOUCH_START, (e: EventTouch) => {
             pressAt = Date.now();
@@ -488,7 +615,12 @@ export class GameController extends Component {
             if (scrolling && onScroll) onScroll(dy);
         }, this);
         card.on(Node.EventType.TOUCH_END, () => {
+            const held = pressAt > 0 ? Date.now() - pressAt : 0;
+            const wasPress = pressAt > 0;
             pressAt = 0;
+            if (wasPress && !scrolling && !shared && held < ALBUM_LONG_PRESS_MS) {
+                replay();
+            }
             scrolling = false;
         }, this);
         card.on(Node.EventType.TOUCH_CANCEL, () => {
@@ -497,6 +629,55 @@ export class GameController extends Component {
         }, this);
 
         return card;
+    }
+
+    /** 图鉴成品缩略：木框小冰箱 + 封门层，特色关加暖色点缀。 */
+    private paintAlbumFridgeThumb(card: Node, levelId: number) {
+        const thumb = new Node('Thumb');
+        thumb.layer = UI_2D;
+        thumb.setPosition(0, 18, 0);
+        thumb.addComponent(UITransform).setContentSize(96, 78);
+        const tg = thumb.addComponent(Graphics);
+        const featured = ALBUM_SHARE_FEATURED.indexOf(levelId) >= 0;
+        tg.fillColor = FRAME;
+        tg.roundRect(-40, -36, 80, 72, 12);
+        tg.fill();
+        tg.fillColor = featured ? new Color(255, 248, 236, 255) : FRIDGE_GLOW;
+        tg.roundRect(-32, -28, 64, 56, 8);
+        tg.fill();
+        const door = featured ? CORAL : new Color(210, 218, 222, 255);
+        for (let r = 0; r < 3; r++) {
+            const y = -18 + r * 16;
+            tg.fillColor = door;
+            tg.roundRect(-24, y, 48, 12, 4);
+            tg.fill();
+        }
+        card.addChild(thumb);
+    }
+
+    /** 分享预览：叠 share_win 成品图 + 文案 Toast，不挡返回。 */
+    private showSharePreview(tip: string) {
+        const old = this.node.getChildByName('SharePreview');
+        if (old) old.destroy();
+        const size = this.canvasSize();
+        const layer = new Node('SharePreview');
+        layer.layer = UI_2D;
+        layer.addComponent(UITransform).setContentSize(size.w, size.h);
+        this.node.addChild(layer);
+        const dim = this.addSprite(layer, 'Dim', this.builtin, size.w, size.h, 0, 0, new Color(48, 48, 48, 160));
+        if (this.shareWin) {
+            const art = this.addSprite(layer, 'Art', this.shareWin, 520, 650, 0, 40, Color.WHITE);
+            art.setScale(0.92, 0.92, 1);
+            tween(art)
+                .to(0.28, { scale: new Vec3(1, 1, 1) }, { easing: easing.backOut })
+                .start();
+        }
+        this.addLabel(layer, 'Tip', tip, 24, MILK, 600, 40).setPosition(0, -360, 0);
+        const close = () => {
+            if (layer.isValid) layer.destroy();
+        };
+        dim.on(Node.EventType.TOUCH_END, close, this);
+        this.scheduleOnce(close, 2.4);
     }
 
     private milestoneSeen(n: number): boolean {
@@ -559,6 +740,8 @@ export class GameController extends Component {
         if (!this.iconUndo) this.iconUndo = await loadFrame(UUID.iconUndo);
         if (!this.iconHint) this.iconHint = await loadFrame(UUID.iconHint);
         if (!this.winPerfect) this.winPerfect = await loadFrame(UUID.winPerfect);
+        if (!this.shareWin) this.shareWin = await loadFrame(UUID.shareWin);
+        if (!this.shareMilestone) this.shareMilestone = await loadFrame(UUID.shareMilestone);
         if (!this.bgPlay) this.bgPlay = await loadFrame(UUID.bgPlay);
         if (!this.bgPlayWall) this.bgPlayWall = await loadFrame(UUID.bgPlayWall);
         if (!this.worktopTop) this.worktopTop = await loadFrame(UUID.worktopTop);
@@ -885,6 +1068,7 @@ export class GameController extends Component {
             n.active = HOME_NODES[i] !== 'Title';
         }
         this.refreshAlbumLink();
+        this.polishHomeChrome();
         const mile = this.pendingMilestone;
         if (mile != null) {
             this.pendingMilestone = null;
@@ -912,36 +1096,19 @@ export class GameController extends Component {
         card.setPosition(0, 20, 0);
         card.setScale(0.9, 0.9, 1);
         card.addComponent(UITransform).setContentSize(560, 420);
-        const cg = card.addComponent(Graphics);
-        cg.fillColor = CREAM;
-        cg.roundRect(-280, -210, 560, 420, 36);
-        cg.fill();
-        cg.lineWidth = 4;
-        cg.strokeColor = SAGE;
-        cg.roundRect(-280, -210, 560, 420, 36);
-        cg.stroke();
-        layer.addChild(card);
-
-        const thumb = new Node('Thumbs');
-        thumb.layer = UI_2D;
-        thumb.setPosition(0, 110, 0);
-        thumb.addComponent(UITransform).setContentSize(400, 80);
-        card.addChild(thumb);
-        for (let i = 0; i < 3; i++) {
-            const cell = new Node(`T${i}`);
-            cell.layer = UI_2D;
-            cell.setPosition((i - 1) * 110, 0, 0);
-            cell.addComponent(UITransform).setContentSize(88, 72);
-            const g = cell.addComponent(Graphics);
-            g.fillColor = FRIDGE_GLOW;
-            g.roundRect(-44, -36, 88, 72, 14);
-            g.fill();
-            g.lineWidth = 3;
-            g.strokeColor = FRAME;
-            g.roundRect(-44, -36, 88, 72, 14);
-            g.stroke();
-            thumb.addChild(cell);
+        if (this.shareMilestone) {
+            this.addSprite(card, 'Bg', this.shareMilestone, 560, 420, 0, 0, Color.WHITE);
+        } else {
+            const cg = card.addComponent(Graphics);
+            cg.fillColor = CREAM;
+            cg.roundRect(-280, -210, 560, 420, 36);
+            cg.fill();
+            cg.lineWidth = 4;
+            cg.strokeColor = SAGE;
+            cg.roundRect(-280, -210, 560, 420, 36);
+            cg.stroke();
         }
+        layer.addChild(card);
 
         this.addLabel(card, 'Title', `今晚已收 ${n} 关`, 40, WALNUT, 500, 52).setPosition(0, 20, 0);
         this.addLabel(
@@ -977,12 +1144,7 @@ export class GameController extends Component {
             this.markMilestoneSeen(n);
             if (layer.isValid) layer.destroy();
             this.refreshAlbumLink();
-            // 主页无 PlayRoot Toast，用短时文案节点代替
-            const tip = this.addLabel(this.node, 'MileToast', `今晚已收 ${n} 关，来一起收冰箱`, 24, WALNUT, 640, 48);
-            tip.setPosition(0, -280, 0);
-            this.scheduleOnce(() => {
-                if (tip.isValid) tip.destroy();
-            }, 1.2);
+            this.showSharePreview(`今晚已收 ${n} 关，来一起收冰箱`);
         });
         this.bindHudPress(skip, () => close());
 
@@ -2659,7 +2821,7 @@ export class GameController extends Component {
             this.startLevel(next);
         });
         this.bindHudPress(shareBtn, () => {
-            this.showToast(`我把今晚的冰箱收好了，用了 ${steps} 步`);
+            this.showSharePreview(`我把今晚的冰箱收好了，用了 ${steps} 步`);
         });
     }
 

@@ -228,6 +228,8 @@ y 930–1168   前景柜台（第 10 关起）
 | `board/tray_empty.png` 等 | 木框内腔 / 封门等 |
 | `board/buffer_board.png` | 柜台木板 |
 | `fx/win_perfect.png` | 胜利标题字图 |
+| `fx/share_win.png` | 胜利/图鉴分享预览卡 |
+| `fx/share_milestone.png` | 主页 10/20/30 里程碑卡底 |
 
 **已废弃、不要再接入对局：** 整机 `fridge_shell` 灰壳方案、珊瑚 `tray_lid` 封盖、效果图裁切底导航。
 

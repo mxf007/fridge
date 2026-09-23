@@ -118,6 +118,7 @@ export function auditVisibleInformation(
                 if (!child.solvable) {
                     actionSafe = false;
                     actionForcedIn = Math.min(actionForcedIn, 1 + (child.forcedIn || 0));
+                    break;
                 }
                 actionPeak = Math.max(actionPeak, child.peakBuffer);
                 actionAllMovesSafe = actionAllMovesSafe && child.allMovesSafe;
@@ -131,6 +132,8 @@ export function auditVisibleInformation(
             safeActions += 1;
             bestPeak = Math.min(bestPeak, actionPeak);
             everySafeActionStaysAllSafe = everySafeActionStaysAllSafe && actionAllMovesSafe;
+            // 第 10 关起验收只要求「存在 peak≤3 的安全路线」，找到即可收束，避免混容量关信念爆炸。
+            if (level.id >= 10 && bestPeak <= 3) break;
         }
 
         const result: SolveResult = safeActions > 0
@@ -274,16 +277,19 @@ function commonVisibleActions(states: AuditState[]): AuditAction[] {
 
 function visibleActions(state: AuditState): AuditAction[] {
     const actions: AuditAction[] = [];
-    const dests: Dest[] = [];
+    const trayDests: Dest[] = [];
+    const bufferDests: Dest[] = [];
     for (let i = 0; i < state.trays.length; i++) {
         const tray = state.trays[i];
-        if (!tray.sealed && tray.items.length < tray.cap) dests.push({ kind: 'tray', index: i });
+        if (!tray.sealed && tray.items.length < tray.cap) trayDests.push({ kind: 'tray', index: i });
     }
     if (state.bufferEnabled) {
         for (let i = 0; i < state.buffer.length; i++) {
-            if (state.buffer[i] == null) dests.push({ kind: 'buffer', index: i });
+            if (state.buffer[i] == null) bufferDests.push({ kind: 'buffer', index: i });
         }
     }
+    // 柜台暂存优先：第 10 关起常是不锁容量的安全探查步，利于审计早停。
+    const dests = bufferDests.concat(trayDests);
     for (let c = 0; c < state.bags.length; c++) {
         if (state.bags[c].length === 0) continue;
         for (let d = 0; d < dests.length; d++) {
@@ -294,9 +300,8 @@ function visibleActions(state: AuditState): AuditAction[] {
     if (state.bufferEnabled) {
         for (let i = 0; i < state.buffer.length; i++) {
             if (state.buffer[i] == null) continue;
-            for (let d = 0; d < dests.length; d++) {
-                if (dests[d].kind !== 'tray') continue;
-                const action: AuditAction = { source: 'buffer', sourceIndex: i, dest: dests[d] };
+            for (let d = 0; d < trayDests.length; d++) {
+                const action: AuditAction = { source: 'buffer', sourceIndex: i, dest: trayDests[d] };
                 if (canApply(state, action)) actions.push(action);
             }
         }

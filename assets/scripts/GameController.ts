@@ -149,9 +149,7 @@ const UUID = {
     builtin: '20835ba4-6145-4fbc-a58a-051ce700aa3e@f9941',
 };
 
-const HOME_NODES = ['Bg', 'Title', 'BtnStart', 'AlbumLink', 'HomeBarMask', 'BtnSettings'];
-const SOUND_KEY = 'fridge_sound';
-const VIBRATE_KEY = 'fridge_vibrate';
+const HOME_NODES = ['Bg', 'Title', 'BtnStart', 'AlbumLink', 'HomeBarMask'];
 const PLAYABLE: LevelDef[] = [LEVEL_01, LEVEL_02, LEVEL_03, LEVEL_04, LEVEL_05, LEVEL_06, LEVEL_07, LEVEL_08, LEVEL_09, LEVEL_10, LEVEL_11, LEVEL_12, LEVEL_13, LEVEL_14, LEVEL_15, LEVEL_16, LEVEL_17, LEVEL_18, LEVEL_19, LEVEL_20, LEVEL_21, LEVEL_22, LEVEL_23, LEVEL_24, LEVEL_25, LEVEL_26, LEVEL_27, LEVEL_28, LEVEL_29, LEVEL_30];
 const CLEARED_KEY = 'fridge_cleared';
 const MILESTONE_KEY = (n: number) => `fridge_milestone_${n}`;
@@ -280,7 +278,7 @@ export class GameController extends Component {
         this.refreshAlbumLink();
     }
 
-    /** §6.1：主页叠在 bg_home 成品图上——热区透明，设置仅音效/震动。 */
+    /** §6.1：主页叠在 bg_home 成品图上——开始/图鉴热区。 */
     private polishHomeChrome() {
         const btn = this.node.getChildByName('BtnStart');
         if (btn) {
@@ -316,103 +314,10 @@ export class GameController extends Component {
         }
         const mask = this.node.getChildByName('HomeBarMask');
         if (mask) mask.active = false;
-        this.ensureHomeSettings();
-    }
-
-    private ensureHomeSettings() {
-        let gear = this.node.getChildByName('BtnSettings');
-        if (!gear) {
-            gear = new Node('BtnSettings');
-            gear.layer = UI_2D;
-            gear.addComponent(UITransform).setContentSize(72, 72);
-            const g = gear.addComponent(Graphics);
-            g.fillColor = MILK;
-            g.circle(0, 0, 30);
-            g.fill();
-            g.lineWidth = 4;
-            g.strokeColor = WALNUT;
-            g.circle(0, 0, 12);
-            g.stroke();
-            g.circle(0, 0, 22);
-            g.stroke();
-            this.node.addChild(gear);
-        }
-        gear.setPosition(300, 560, 0);
-        gear.active = true;
-        gear.off(Node.EventType.TOUCH_END);
-        this.bindHudPress(gear, () => this.openSettings());
-    }
-
-    private soundOn(): boolean {
-        const raw = sys.localStorage.getItem(SOUND_KEY);
-        return raw !== '0';
-    }
-
-    private vibrateOn(): boolean {
-        const raw = sys.localStorage.getItem(VIBRATE_KEY);
-        return raw !== '0';
-    }
-
-    private openSettings() {
-        const old = this.node.getChildByName('SettingsLayer');
-        if (old) old.destroy();
-        const size = this.canvasSize();
-        const layer = new Node('SettingsLayer');
-        layer.layer = UI_2D;
-        layer.addComponent(UITransform).setContentSize(size.w, size.h);
-        this.node.addChild(layer);
-        const dim = this.addSprite(layer, 'Dim', this.builtin, size.w, size.h, 0, 0, new Color(61, 50, 41, 140));
-        dim.on(Node.EventType.TOUCH_END, () => {
-            if (layer.isValid) layer.destroy();
-        }, this);
-
-        const card = new Node('Card');
-        card.layer = UI_2D;
-        card.setPosition(0, 40, 0);
-        card.addComponent(UITransform).setContentSize(520, 360);
-        const cg = card.addComponent(Graphics);
-        cg.fillColor = CREAM;
-        cg.roundRect(-260, -180, 520, 360, 28);
-        cg.fill();
-        layer.addChild(card);
-        card.on(Node.EventType.TOUCH_END, () => {}, this);
-
-        this.addLabel(card, 'Title', '设置', 36, WALNUT, 400, 48).setPosition(0, 120, 0);
-        this.addLabel(card, 'Hint', '仅音效与震动，没有背景音乐', 22, FRAME, 440, 36).setPosition(0, 70, 0);
-
-        const row = (name: string, y: number, on: boolean, toggle: () => void) => {
-            const btn = new Node(name);
-            btn.layer = UI_2D;
-            btn.setPosition(0, y, 0);
-            btn.addComponent(UITransform).setContentSize(420, 72);
-            const g = btn.addComponent(Graphics);
-            g.fillColor = MILK;
-            g.roundRect(-210, -36, 420, 72, 20);
-            g.fill();
-            g.lineWidth = 3;
-            g.strokeColor = on ? SAGE : FRAME;
-            g.roundRect(-210, -36, 420, 72, 20);
-            g.stroke();
-            this.addLabel(btn, 'Txt', `${name === 'Sound' ? '音效' : '震动'}  ${on ? '开' : '关'}`, 28, WALNUT, 360, 40);
-            card.addChild(btn);
-            this.bindHudPress(btn, () => {
-                toggle();
-                if (layer.isValid) layer.destroy();
-                this.openSettings();
-            });
-        };
-        row('Sound', 0, this.soundOn(), () => {
-            sys.localStorage.setItem(SOUND_KEY, this.soundOn() ? '0' : '1');
-        });
-        row('Vibrate', -90, this.vibrateOn(), () => {
-            sys.localStorage.setItem(VIBRATE_KEY, this.vibrateOn() ? '0' : '1');
-        });
-
-        const close = this.addLabel(card, 'Close', '好的', 28, SAGE, 160, 40);
-        close.setPosition(0, -140, 0);
-        this.bindHudPress(close, () => {
-            if (layer.isValid) layer.destroy();
-        });
+        const settingsBtn = this.node.getChildByName('BtnSettings');
+        if (settingsBtn) settingsBtn.destroy();
+        const settingsLayer = this.node.getChildByName('SettingsLayer');
+        if (settingsLayer) settingsLayer.destroy();
     }
 
     private refreshAlbumLink() {

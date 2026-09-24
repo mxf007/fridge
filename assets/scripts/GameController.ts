@@ -70,6 +70,11 @@ const DOOR = new Color(198, 202, 198, 255);
 const HANDLE = new Color(168, 172, 168, 255);
 const CORAL = new Color(224, 122, 95, 255);
 const SAGE = new Color(122, 158, 126, 255);
+/** UI B1 §11：容器 vs 物品辨色 */
+const CABINET_FRAME = new Color(143, 107, 82, 255);
+const CABINET_CAVITY = new Color(201, 216, 222, 255);
+const CABINET_CAVITY_SEL = new Color(226, 238, 242, 255);
+const COUNTER_TRAY = new Color(212, 196, 176, 255);
 
 const Y_TRAY = 250;
 const Y_BUFFER = -524;
@@ -252,6 +257,8 @@ export class GameController extends Component {
     private lockedBagCol: number | null = null;
     /** 开局锁定的购物袋前后排；null = 一排。整关不随翻层重排。 */
     private bagRowPlan: { front: number[]; back: number[] } | null = null;
+    /** B1：每列叠盘错落与盘径档，开局算一次。 */
+    private bagVisualByCol: { dx: number; dy: number; deg: number; wScale: number }[] = [];
     /** 通关刚跨过 10/20/30，回主页弹一次里程碑卡。 */
     private pendingMilestone: number | null = null;
 
@@ -677,6 +684,7 @@ export class GameController extends Component {
         this.revealBagCol = null;
         this.lockedBagCol = null;
         this.bagRowPlan = this.buildBagRowPlan(level);
+        this.bagVisualByCol = this.buildBagVisualPlan(level);
         this.ensurePlayRoot();
         this.playRoot.active = true;
         this.render();
@@ -1064,16 +1072,38 @@ export class GameController extends Component {
         return Y_TRAY;
     }
 
-    /** 胡桃木色外框 + 冷光内腔；收满后灰门合上。n=5 走窄版，n≤4 保持 1–18 外观。 */
+    private trayLayoutB1(): boolean {
+        const board = this.board;
+        return !!(board && board.trays.length >= 5 && this.mixedCaps());
+    }
+
+    /** 胡桃木色外框 + 冷光内腔；收满后灰门合上。混容量五格走 B1 §11；否则 n=5 走 B0 窄版。 */
     private trayMetrics(cap: number) {
         const n = this.board ? this.board.trays.length : 2;
+        if (n >= 5 && this.mixedCaps()) {
+            const frame = 14;
+            const outerH = 300;
+            const slotH = 272;
+            let outerW: number;
+            let slotW: number;
+            if (cap <= 2) {
+                outerW = 100;
+                slotW = 72;
+            } else if (cap >= 4) {
+                outerW = 168;
+                slotW = 140;
+            } else {
+                outerW = 128;
+                slotW = 100;
+            }
+            return { slotW, slotH, frame, outerW, outerH, cap, b1: true as const };
+        }
         if (n >= 5) {
-            // 目标：scale1 外宽 132、外高 300；大/中/小 = 1.0 / 0.85 / 0.70；5 格 + gap10 ≤ 720
             const scale = cap >= 4 ? 1 : cap <= 2 ? 0.7 : 0.85;
             const slotW = 100 * scale;
             const slotH = 268 * scale;
             const frame = 16 * scale;
-            return { slotW, slotH, frame, outerW: slotW + frame * 2, outerH: slotH + frame * 2, cap };
+            return { slotW, slotH, frame, outerW: slotW + frame * 2, outerH: slotH + frame * 2, cap, b1: false as const };
         }
         const mixed = !!(this.board && this.board.trays.some((t) => t.cap !== this.board!.trays[0].cap));
         let scale = cap >= 4 ? 1.15 : cap <= 2 ? 0.85 : 1;
@@ -1082,12 +1112,78 @@ export class GameController extends Component {
         const slotW = 140 * scale;
         const slotH = 340 * scale;
         const frame = 18 * scale;
-        return { slotW, slotH, frame, outerW: slotW + frame * 2, outerH: slotH + frame * 2, cap };
+        return { slotW, slotH, frame, outerW: slotW + frame * 2, outerH: slotH + frame * 2, cap, b1: false as const };
+    }
+
+    private buildBagVisualPlan(level: LevelDef): { dx: number; dy: number; deg: number; wScale: number }[] {
+        const n = level.bags.length;
+        const plan: { dx: number; dy: number; deg: number; wScale: number }[] = [];
+        let maxLen = 0;
+        for (let c = 0; c < n; c++) {
+            if (level.bags[c].length > maxLen) maxLen = level.bags[c].length;
+        }
+        const jitter = [
+            { dx: -12, dy: 4, deg: -2 },
+            { dx: 8, dy: 6, deg: 1 },
+            { dx: -6, dy: 2, deg: -1 },
+            { dx: 4, dy: -4, deg: 1 },
+            { dx: -8, dy: 3, deg: -1 },
+            { dx: 10, dy: -6, deg: 1.5 },
+        ];
+        for (let c = 0; c < n; c++) {
+            const len = level.bags[c].length;
+            const wScale = len >= maxLen && maxLen > 1 ? 1 : len <= 1 ? 0.81 : 0.89;
+            const j = jitter[c % jitter.length];
+            plan.push({ dx: j.dx, dy: j.dy, deg: j.deg, wScale });
+        }
+        return plan;
+    }
+
+    private paintB1Cavity(g: Graphics, m: { slotW: number; slotH: number; cap: number }, selected: boolean) {
+        const cavity = selected ? CABINET_CAVITY_SEL : CABINET_CAVITY;
+        if (m.cap >= 4) {
+            const lowerH = 138;
+            const upperH = 128;
+            const shelfH = 6;
+            const y0 = -m.slotH / 2;
+            g.fillColor = new Color(cavity.r, cavity.g, cavity.b, 255);
+            g.roundRect(-m.slotW / 2, y0, m.slotW, lowerH, 16);
+            g.fill();
+            g.fillColor = new Color(
+                Math.min(cavity.r + 8, 255),
+                Math.min(cavity.g + 8, 255),
+                Math.min(cavity.b + 8, 255),
+                255,
+            );
+            g.roundRect(-m.slotW / 2, y0 + lowerH + shelfH, m.slotW, upperH, 16);
+            g.fill();
+            g.fillColor = CABINET_FRAME;
+            g.roundRect(-m.slotW / 2, y0 + lowerH, m.slotW, shelfH, 2);
+            g.fill();
+        } else {
+            g.fillColor = cavity;
+            g.roundRect(-m.slotW / 2, -m.slotH / 2, m.slotW, m.slotH, 20);
+            g.fill();
+            if (m.cap === 3) {
+                g.strokeColor = new Color(107, 74, 58, 36);
+                g.lineWidth = 2;
+                const y1 = -m.slotH / 2 + m.slotH * (1 / 3);
+                const y2 = -m.slotH / 2 + m.slotH * (2 / 3);
+                g.moveTo(-m.slotW / 2 + 8, y1);
+                g.lineTo(m.slotW / 2 - 8, y1);
+                g.moveTo(-m.slotW / 2 + 8, y2);
+                g.lineTo(m.slotW / 2 - 8, y2);
+                g.stroke();
+            }
+        }
+        g.fillColor = selected ? new Color(255, 255, 255, 200) : new Color(255, 255, 255, 70);
+        g.circle(0, m.slotH / 2 - 28, selected ? 28 : 18);
+        g.fill();
     }
 
     private drawTrays(root: Node, board: BoardState) {
         const n = board.trays.length;
-        const gap = n >= 5 ? 10 : n >= 4 ? 12 : 24;
+        const gap = this.trayLayoutB1() ? 8 : n >= 5 ? 10 : n >= 4 ? 12 : 24;
         const metrics = board.trays.map((t) => this.trayMetrics(t.cap));
         let total = gap * Math.max(n - 1, 0);
         for (let i = 0; i < n; i++) total += metrics[i].outerW;
@@ -1110,17 +1206,27 @@ export class GameController extends Component {
             gNode.layer = UI_2D;
             gNode.addComponent(UITransform).setContentSize(m.outerW, m.outerH);
             const g = gNode.addComponent(Graphics);
-            g.fillColor = selected ? WALNUT : FRAME;
+            const b1 = 'b1' in m && m.b1;
+            g.fillColor = b1 ? CABINET_FRAME : selected ? WALNUT : FRAME;
             g.roundRect(-m.outerW / 2, -m.outerH / 2, m.outerW, m.outerH, 28);
             g.fill();
             if (selected) {
-                g.lineWidth = 8;
-                g.strokeColor = CORAL;
-                g.roundRect(-m.outerW / 2 + 4, -m.outerH / 2 + 4, m.outerW - 8, m.outerH - 8, 24);
-                g.stroke();
+                if (b1) {
+                    g.lineWidth = 2;
+                    g.strokeColor = WALNUT;
+                    g.roundRect(-m.outerW / 2 + 3, -m.outerH / 2 + 3, m.outerW - 6, m.outerH - 6, 24);
+                    g.stroke();
+                } else {
+                    g.lineWidth = 8;
+                    g.strokeColor = CORAL;
+                    g.roundRect(-m.outerW / 2 + 4, -m.outerH / 2 + 4, m.outerW - 8, m.outerH - 8, 24);
+                    g.stroke();
+                }
             }
             if (closed) {
                 this.paintDoor(g, m.slotW, m.slotH);
+            } else if (b1) {
+                this.paintB1Cavity(g, m, selected);
             } else {
                 g.fillColor = selected ? new Color(245, 252, 255, 255) : new Color(198, 210, 214, 255);
                 g.roundRect(-m.slotW / 2, -m.slotH / 2, m.slotW, m.slotH, 20);
@@ -1712,40 +1818,51 @@ export class GameController extends Component {
         const col = board.bags[c];
         const count = col.length;
         if (count <= 0) return null;
+        const useB1Bag = board.bags.length >= BAG_TWO_ROW_MIN;
+        const vis = useB1Bag ? (this.bagVisualByCol[c] || { dx: 0, dy: 0, deg: 0, wScale: 1 }) : { dx: 0, dy: 0, deg: 0, wScale: 1 };
+        const colW = Math.max(88, Math.round((layout.w * vis.wScale) / 2) * 2);
+        const colLayout = {
+            w: colW,
+            trayH: Math.round(colW * (302 / 512)),
+            step: Math.max(12, Math.round(colW * (56 / 512))),
+            gap: layout.gap,
+            food: Math.round(colW * 0.39),
+        };
         const x = (slot - (rowN - 1) / 2) * (layout.w + layout.gap);
-        const h = this.columnHeight(layout, count);
+        const h = this.columnHeight(colLayout, count);
         const colNode = new Node(`Bag${c}`);
         colNode.layer = UI_2D;
-        colNode.setPosition(x, baseline + h / 2, 0);
-        colNode.addComponent(UITransform).setContentSize(layout.w, h);
+        colNode.setPosition(x + vis.dx, baseline + h / 2 + vis.dy, 0);
+        colNode.angle = vis.deg;
+        colNode.addComponent(UITransform).setContentSize(colW, h);
         root.addChild(colNode);
 
         const shadow = new Node('ContactShadow');
         shadow.layer = UI_2D;
         shadow.setPosition(0, -h / 2 + 2, 0);
-        shadow.addComponent(UITransform).setContentSize(layout.w, 28);
+        shadow.addComponent(UITransform).setContentSize(colW, 28);
         const sg = shadow.addComponent(Graphics);
-        sg.fillColor = new Color(61, 50, 41, 110);
-        sg.ellipse(0, 0, layout.w * 0.42, 10);
+        sg.fillColor = new Color(61, 50, 41, 46);
+        sg.ellipse(0, 0, colW * 0.42, 10);
         sg.fill();
         colNode.addChild(shadow);
 
         for (let i = 0; i < count; i++) {
             const isTop = i === count - 1;
-            const y = -h / 2 + layout.trayH / 2 + i * layout.step;
+            const y = -h / 2 + colLayout.trayH / 2 + i * colLayout.step;
             const tileNode = this.addSprite(
                 colNode,
                 `T${i}`,
                 this.bagTrayLower || this.bagTrayTop || this.builtin,
-                layout.w,
-                layout.trayH,
+                colW,
+                colLayout.trayH,
                 0,
                 y,
                 isTop ? this.trayTint(col[i]) : Color.WHITE,
             );
             if (!isTop) continue;
-            const foodSize = this.bagFoodSize(col[i], layout.food);
-            const seatY = Math.round(layout.trayH * -0.04);
+            const foodSize = this.bagFoodSize(col[i], colLayout.food);
+            const seatY = Math.round(colLayout.trayH * -0.04);
             const foodY = seatY + Math.round(foodSize.h * 0.22);
             const foodShadow = new Node('FoodShadow');
             foodShadow.layer = UI_2D;
@@ -1767,7 +1884,7 @@ export class GameController extends Component {
                 Color.WHITE,
             );
             if (this.revealBagCol === c) {
-                tileNode.setPosition(0, y - layout.step, 0);
+                tileNode.setPosition(0, y - colLayout.step, 0);
                 const op = tileNode.addComponent(UIOpacity);
                 op.opacity = 0;
                 tween(tileNode).to(0.18, { position: new Vec3(0, y, 0) }, { easing: easing.cubicOut }).start();
@@ -2000,8 +2117,9 @@ export class GameController extends Component {
         return this.bagFrames[id] || this.frameForFood(id);
     }
 
-    /** 只有栈顶整盘染色。下层前唇保持奶油色，避免泄露种类。 */
+    /** 栈顶：混容量关用中性叠盘色（B1）；否则按种类染盘顶。下层不染色。 */
     private trayTint(id: FoodId): Color {
+        if (this.mixedCaps()) return COUNTER_TRAY;
         const tint: Partial<Record<FoodId, [number, number, number]>> = {
             veg: [176, 198, 156],
             fruit: [224, 150, 142],

@@ -397,10 +397,10 @@ cap === 4  →  W, 外宽 168（双层内腔）
 | 1–9 关 | 不画柜台 |
 | 失败闪 | `buffer_full`→柜台；`locked_out`→锁错格内腔 |
 
-**工程衔接**
+**工程衔接（`truck` 分支已接第一版）**
 
-- 替换 `GameController` 在 **n≥5 且 mixedCaps** 下的 `trayMetrics` 外宽为 100/128/168、**outerH=300**，并绘制 W 隔板。  
-- 撤销或弱化 `trayTint` 对栈顶整盘的暖黄染色，改 CounterTray + 食材分色。
+- `GameController`：**n≥5 且 mixedCaps** → B1 `trayMetrics`、内腔色、W 隔板、`Y_TRAY_B1=270`、≥5 列叠盘错落、`foodDisplayColor` / 中性 `CounterTray`。  
+- 贴图仍走 `food_*` PNG，乘 B1 色；美术换皮后逐步去掉乘色。
 
 **B1 验收（建议 L26 截图）**
 

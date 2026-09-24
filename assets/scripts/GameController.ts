@@ -75,8 +75,13 @@ const CABINET_FRAME = new Color(143, 107, 82, 255);
 const CABINET_CAVITY = new Color(201, 216, 222, 255);
 const CABINET_CAVITY_SEL = new Color(226, 238, 242, 255);
 const COUNTER_TRAY = new Color(212, 196, 176, 255);
+const COUNTER_TRAY_LIP = new Color(235, 226, 214, 255);
+const MILK_BOX_BODY = new Color(247, 250, 252, 255);
+const CITRUS_BODY = new Color(240, 140, 46, 255);
 
 const Y_TRAY = 250;
+/** B1 §11.1：外框顶 y=220、高 300 → 中心 screenY=370 → cocosY=270 */
+const Y_TRAY_B1 = 270;
 const Y_BUFFER = -524;
 /** ≥5 列折两排：前排靠柜台，后排靠冰箱；深栈进后排。 */
 const BAG_TWO_ROW_MIN = 5;
@@ -684,7 +689,7 @@ export class GameController extends Component {
         this.revealBagCol = null;
         this.lockedBagCol = null;
         this.bagRowPlan = this.buildBagRowPlan(level);
-        this.bagVisualByCol = this.buildBagVisualPlan(level);
+        this.bagVisualByCol = this.buildBagVisualPlan(level, this.bagRowPlan);
         this.ensurePlayRoot();
         this.playRoot.active = true;
         this.render();
@@ -1069,7 +1074,7 @@ export class GameController extends Component {
     }
 
     private trayY(): number {
-        return Y_TRAY;
+        return this.trayLayoutB1() ? Y_TRAY_B1 : Y_TRAY;
     }
 
     private trayLayoutB1(): boolean {
@@ -1115,13 +1120,34 @@ export class GameController extends Component {
         return { slotW, slotH, frame, outerW: slotW + frame * 2, outerH: slotH + frame * 2, cap, b1: false as const };
     }
 
-    private buildBagVisualPlan(level: LevelDef): { dx: number; dy: number; deg: number; wScale: number }[] {
+    private bagColRow(c: number, rowPlan: { front: number[]; back: number[] } | null): 'front' | 'back' | null {
+        if (!rowPlan) return null;
+        if (rowPlan.front.indexOf(c) >= 0) return 'front';
+        if (rowPlan.back.indexOf(c) >= 0) return 'back';
+        return null;
+    }
+
+    private maxBagDepthInRow(level: LevelDef, cols: number[]): number {
+        let maxLen = 0;
+        for (let i = 0; i < cols.length; i++) {
+            const len = level.bags[cols[i]].length;
+            if (len > maxLen) maxLen = len;
+        }
+        return maxLen;
+    }
+
+    private buildBagVisualPlan(
+        level: LevelDef,
+        rowPlan: { front: number[]; back: number[] } | null,
+    ): { dx: number; dy: number; deg: number; wScale: number }[] {
         const n = level.bags.length;
         const plan: { dx: number; dy: number; deg: number; wScale: number }[] = [];
-        let maxLen = 0;
+        let globalMax = 0;
         for (let c = 0; c < n; c++) {
-            if (level.bags[c].length > maxLen) maxLen = level.bags[c].length;
+            if (level.bags[c].length > globalMax) globalMax = level.bags[c].length;
         }
+        const maxFront = rowPlan ? this.maxBagDepthInRow(level, rowPlan.front) : globalMax;
+        const maxBack = rowPlan ? this.maxBagDepthInRow(level, rowPlan.back) : globalMax;
         const jitter = [
             { dx: -12, dy: 4, deg: -2 },
             { dx: 8, dy: 6, deg: 1 },
@@ -1132,11 +1158,30 @@ export class GameController extends Component {
         ];
         for (let c = 0; c < n; c++) {
             const len = level.bags[c].length;
-            const wScale = len >= maxLen && maxLen > 1 ? 1 : len <= 1 ? 0.81 : 0.89;
+            const row = this.bagColRow(c, rowPlan);
+            const rowMax = row === 'back' ? maxBack : row === 'front' ? maxFront : globalMax;
+            const wScale = len >= rowMax && rowMax > 1 ? 1 : len <= 1 ? 0.81 : 0.89;
             const j = jitter[c % jitter.length];
             plan.push({ dx: j.dx, dy: j.dy, deg: j.deg, wScale });
         }
         return plan;
+    }
+
+    /** B1：混容量关抬高食材与容器对比；贴图乘色。 */
+    private foodDisplayColor(kind: FoodId): Color {
+        if (!this.mixedCaps()) return Color.WHITE;
+        if (kind === 'milk') return MILK_BOX_BODY;
+        if (kind === 'lemon' || kind === 'fruit') return CITRUS_BODY;
+        if (kind === 'veg') return new Color(118, 158, 98, 255);
+        if (kind === 'meat') return new Color(214, 142, 118, 255);
+        if (kind === 'sauce') return new Color(168, 118, 72, 255);
+        if (kind === 'leftover') return new Color(148, 128, 158, 255);
+        if (kind === 'grape') return new Color(168, 138, 198, 255);
+        if (kind === 'kiwi') return new Color(128, 168, 88, 255);
+        if (kind === 'pineapple') return new Color(228, 188, 72, 255);
+        if (kind === 'watermelon') return new Color(198, 88, 98, 255);
+        if (kind === 'coconut') return new Color(188, 158, 118, 255);
+        return Color.WHITE;
     }
 
     private paintB1Cavity(g: Graphics, m: { slotW: number; slotH: number; cap: number }, selected: boolean) {
@@ -1378,17 +1423,18 @@ export class GameController extends Component {
         const step = (m.slotH - pad * 2) / cap;
         const h = Math.max(step - 8, 22);
         const w = m.slotW * 0.7;
+        const b1 = this.trayLayoutB1();
         for (let i = 0; i < cap; i++) {
             const y = this.foodSlotY(m.slotH, cap, i);
             if (i < filled) {
-                g.fillColor = new Color(255, 255, 255, 16);
+                g.fillColor = b1 ? new Color(255, 255, 255, 20) : new Color(255, 255, 255, 16);
                 g.roundRect(-w / 2, y - h / 2, w, h, 10);
                 g.fill();
             } else {
-                g.fillColor = new Color(255, 253, 248, 42);
+                g.fillColor = b1 ? new Color(186, 204, 210, 72) : new Color(255, 253, 248, 42);
                 g.roundRect(-w / 2, y - h / 2, w, h, 10);
                 g.fill();
-                g.strokeColor = new Color(255, 253, 248, 170);
+                g.strokeColor = b1 ? new Color(107, 74, 58, 48) : new Color(255, 253, 248, 170);
                 g.lineWidth = 2;
                 g.roundRect(-w / 2, y - h / 2, w, h, 10);
                 g.stroke();
@@ -1679,7 +1725,16 @@ export class GameController extends Component {
         const size = this.trayFoodSize(slotH, cap);
         for (let k = 0; k < items.length; k++) {
             const fy = centerY + this.foodSlotY(slotH, cap, k);
-            this.addSprite(node, `Food${k}`, this.frameForFood(items[k]), size.w, size.h, 0, fy, Color.WHITE);
+            this.addSprite(
+                node,
+                `Food${k}`,
+                this.frameForFood(items[k]),
+                size.w,
+                size.h,
+                0,
+                fy,
+                this.foodDisplayColor(items[k]),
+            );
         }
     }
 
@@ -1801,7 +1856,9 @@ export class GameController extends Component {
             const colNode = this.drawOneBagColumn(root, board, c, layout, seat, rowN, slot);
             if (colNode && scale !== 1) {
                 colNode.setScale(scale, scale, 1);
-                colNode.setPosition(x, seat + (h * scale) / 2, 0);
+                const p = colNode.position;
+                const dy = p.y - (seat + h / 2);
+                colNode.setPosition(p.x, seat + (h * scale) / 2 + dy, 0);
             }
         }
     }
@@ -1858,7 +1915,7 @@ export class GameController extends Component {
                 colLayout.trayH,
                 0,
                 y,
-                isTop ? this.trayTint(col[i]) : Color.WHITE,
+                isTop ? this.trayTint(col[i]) : COUNTER_TRAY_LIP,
             );
             if (!isTop) continue;
             const foodSize = this.bagFoodSize(col[i], colLayout.food);
@@ -1881,7 +1938,7 @@ export class GameController extends Component {
                 foodSize.h,
                 0,
                 foodY,
-                Color.WHITE,
+                this.foodDisplayColor(col[i]),
             );
             if (this.revealBagCol === c) {
                 tileNode.setPosition(0, y - colLayout.step, 0);
@@ -2060,7 +2117,16 @@ export class GameController extends Component {
 
             const item = board.buffer[i];
             if (item) {
-                this.addSprite(slotNode, 'Food', this.frameForFood(item), BUF_FOOD, BUF_FOOD, 0, 0, Color.WHITE);
+                this.addSprite(
+                    slotNode,
+                    'Food',
+                    this.frameForFood(item),
+                    BUF_FOOD,
+                    BUF_FOOD,
+                    0,
+                    0,
+                    this.foodDisplayColor(item),
+                );
                 if (this.holdHint && this.holdHint.bufferIndex === i) {
                     this.drawSageDashedRing(slotNode, BUF_FOOD + 8, BUF_FOOD + 8, 18, 'HintRing');
                 }
@@ -2203,7 +2269,16 @@ export class GameController extends Component {
             land = new Vec3(size.w / flyW, size.h / flyH, 1);
         }
 
-        const flyer = this.addSprite(root, 'Flyer', flyFrame, flyW, flyH, from.x, from.y, Color.WHITE);
+        const flyer = this.addSprite(
+            root,
+            'Flyer',
+            flyFrame,
+            flyW,
+            flyH,
+            from.x,
+            from.y,
+            this.foodDisplayColor(item),
+        );
         tween(flyer)
             .to(FLY_SEC, { position: new Vec3(to.x, to.y, 0), scale: land }, { easing: easing.cubicOut })
             .start();
@@ -2246,7 +2321,16 @@ export class GameController extends Component {
         const fy = this.foodSlotY(m.slotH, board.trays[destIndex].cap, nextCount);
         const toWorld = trayNode.getComponent(UITransform)!.convertToWorldSpaceAR(new Vec3(0, fy, 0));
         const to = ui.convertToNodeSpaceAR(toWorld);
-        const flyer = this.addSprite(root, 'Flyer', this.frameForFood(item), 64, 96, from.x, from.y, Color.WHITE);
+        const flyer = this.addSprite(
+            root,
+            'Flyer',
+            this.frameForFood(item),
+            64,
+            96,
+            from.x,
+            from.y,
+            this.foodDisplayColor(item),
+        );
         const size = this.trayFoodSize(m.slotH, board.trays[destIndex].cap);
         const land = new Vec3(size.w / 64, size.h / 96, 1);
         tween(flyer)

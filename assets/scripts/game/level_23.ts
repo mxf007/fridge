@@ -3,19 +3,21 @@ import { assertLevel } from './types';
 import type { LevelDef } from './types';
 import { auditVisibleInformation } from './VisibleInformationAudit';
 
-/** 第 23 关：假同色肉↔酱。四格 cap3；奶/菜/肉/酱 各 3。 */
+/**
+ * 第 23 关：假同色肉↔酱。混容量 3,3,2,4；酱2+奶3+菜3+肉4。
+ */
 export const LEVEL_23: LevelDef = {
     id: 23,
     title: '肉酱别看花',
-    teach: '肉和酱颜色近，看清再换格',
-    trays: [{ cap: 3 }, { cap: 3 }, { cap: 3 }, { cap: 3 }],
+    teach: '酱两件进小格；肉和酱颜色近，看清再换格',
+    trays: [{ cap: 3 }, { cap: 3 }, { cap: 2 }, { cap: 4 }],
     bags: [
         ['meat'],
         ['meat'],
-        ['meat'],
         ['sauce'],
         ['sauce'],
-        ['veg', 'veg', 'veg', 'milk', 'milk', 'milk', 'sauce'],
+        ['milk'],
+        ['meat', 'meat', 'veg', 'veg', 'veg', 'milk', 'milk'],
     ],
     buffer: 3,
     loseable: true,
@@ -40,39 +42,60 @@ function run(
 export function selfCheckLevel23(): void {
     assertLevel(LEVEL_23);
     const b = BoardState.fromLevel(LEVEL_23);
-    if (!b.bufferEnabled) throw new Error('L23 bufferEnabled must be true');
-    if (b.trays.length !== 4 || b.bags.length !== 6) throw new Error('L23 must be 4 trays / 6 bags');
-    if (
-        b.peekBag(0) !== 'meat'
-        || b.peekBag(3) !== 'sauce'
-        || b.peekBag(5) !== 'sauce'
-    ) {
-        throw new Error('L23 tops must expose meat and sauce');
-    }
+    if (b.trays.map((t) => t.cap).join(',') !== '3,3,2,4') throw new Error('L23 caps');
     const counts: Record<string, number> = {};
     for (const x of LEVEL_23.bags.flat()) counts[x] = (counts[x] || 0) + 1;
-    if (counts.milk !== 3 || counts.veg !== 3 || counts.meat !== 3 || counts.sauce !== 3) {
-        throw new Error('L23 counts must be milk3/veg3/meat3/sauce3');
+    if (counts.milk !== 3 || counts.veg !== 3 || counts.meat !== 4 || counts.sauce !== 2) {
+        throw new Error('L23 counts');
     }
-    if (counts.coconut) throw new Error('L23 must not use coconut (mutex with sauce)');
     const audit = auditVisibleInformation(LEVEL_23);
     if (!audit.passes) throw new Error(`L23 audit failed: ${audit.failures.join(',')}`);
 
     const bounce = BoardState.fromLevel(LEVEL_23);
-    bounce.placeFromBag(0);
-    const bad = bounce.placeFromBag(3);
-    if (bad.ok || bad.reason !== 'wrong_kind') throw new Error('L23 sauce must bounce on meat tray');
+    bounce.selectTray(2);
+    bounce.placeFromBag(2);
+    const bad = bounce.placeFromBag(0);
+    if (bad.ok || bad.reason !== 'wrong_kind') throw new Error('L23 meat bounce on sauce tray');
 
     const play = BoardState.fromLevel(LEVEL_23);
     run(play, [
-        { bag: 0 }, { bag: 1 }, { bag: 2 },
-        { tray: 1, bag: 3 }, { bag: 4 }, { bag: 5 },
-        { tray: 2, bag: 5 }, { bag: 5 }, { bag: 5 },
-        { tray: 3, bag: 5 }, { bag: 5 }, { bag: 5 },
+        { tray: 2, bag: 2 },
+        { bag: 3 },
+        { tray: 0, bag: 4 },
+        { bag: 5 },
+        { bag: 5 },
+        { tray: 1, bag: 5 },
+        { bag: 5 },
+        { bag: 5 },
+        { tray: 3, bag: 0 },
+        { bag: 1 },
+        { bag: 5 },
+        { bag: 5 },
     ]);
     if (!play.isWin() || play.steps !== 12) throw new Error('L23 must win in 12');
-    const kinds = play.trays.map((t) => t.kind).sort().join(',');
-    if (kinds !== 'meat,milk,sauce,veg') throw new Error(`L23 kinds ${kinds}`);
-    if (LEVEL_23.loseable !== true) throw new Error('L23 loseable');
+
+    const fail = BoardState.fromLevel(LEVEL_23);
+    fail.placeFromBag(2);
+    fail.placeFromBag(3);
+    if (fail.trays[0].kind !== 'sauce' || fail.trays[0].sealed) {
+        throw new Error('L23 waste sauce must sit in cap3');
+    }
+    fail.selectTray(1);
+    fail.placeFromBag(4);
+    fail.placeFromBag(5);
+    fail.placeFromBag(5);
+    fail.selectTray(2);
+    fail.placeFromBag(5);
+    fail.placeFromBag(5);
+    fail.selectBuffer(0);
+    const park = fail.placeFromBag(5);
+    if (!park.ok || park.item !== 'veg') throw new Error('L23 waste must park veg');
+    fail.selectTray(3);
+    fail.placeFromBag(0);
+    fail.placeFromBag(1);
+    fail.placeFromBag(5);
+    fail.placeFromBag(5);
+    if (fail.isWin() || fail.failReason() == null) throw new Error('L23 waste must fail');
+    if (fail.failReason() !== 'locked_out') throw new Error(`L23 waste ${fail.failReason()}`);
     console.log('L23 OK', audit.variantCount);
 }

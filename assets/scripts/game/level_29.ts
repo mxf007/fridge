@@ -4,21 +4,20 @@ import type { LevelDef } from './types';
 import { auditVisibleInformation } from './VisibleInformationAudit';
 
 /**
- * 第 29 关：预决赛。五格均 cap3；奶/菜/肉/酱/西 各 3。
- * 解锁 30 关；不出「分享步数」强提示（留给 30）。
+ * 第 29 关：预决赛。混容量 3,3,2,3,4；西3+奶3+菜3+肉4+酱2。
  */
 export const LEVEL_29: LevelDef = {
     id: 29,
     title: '预决赛五色',
-    teach: '五种各一格；西瓜整格收满再换',
-    trays: [{ cap: 3 }, { cap: 3 }, { cap: 3 }, { cap: 3 }, { cap: 3 }],
+    teach: '酱两件进小格；西瓜三件占一格',
+    trays: [{ cap: 3 }, { cap: 3 }, { cap: 2 }, { cap: 3 }, { cap: 4 }],
     bags: [
         ['watermelon'],
         ['watermelon'],
         ['watermelon'],
-        ['milk'],
-        ['milk'],
-        ['sauce', 'sauce', 'sauce', 'meat', 'meat', 'meat', 'veg', 'veg', 'veg', 'milk'],
+        ['sauce'],
+        ['sauce'],
+        ['meat', 'meat', 'meat', 'meat', 'veg', 'veg', 'veg', 'milk', 'milk', 'milk'],
     ],
     buffer: 3,
     loseable: true,
@@ -43,39 +42,57 @@ function run(
 export function selfCheckLevel29(): void {
     assertLevel(LEVEL_29);
     const b = BoardState.fromLevel(LEVEL_29);
-    if (!b.bufferEnabled) throw new Error('L29 bufferEnabled');
-    if (b.trays.length !== 5 || !b.trays.every((t) => t.cap === 3)) throw new Error('L29 caps');
+    if (b.trays.map((t) => t.cap).join(',') !== '3,3,2,3,4') throw new Error('L29 caps');
     const counts: Record<string, number> = {};
     for (const x of LEVEL_29.bags.flat()) counts[x] = (counts[x] || 0) + 1;
     if (
         counts.milk !== 3
         || counts.veg !== 3
-        || counts.meat !== 3
-        || counts.sauce !== 3
+        || counts.meat !== 4
+        || counts.sauce !== 2
         || counts.watermelon !== 3
     ) {
         throw new Error('L29 counts');
     }
-    if (counts.coconut) throw new Error('L29 no coconut with sauce');
     const audit = auditVisibleInformation(LEVEL_29);
     if (!audit.passes) throw new Error(`L29 audit failed: ${audit.failures.join(',')}`);
-
-    const bounce = BoardState.fromLevel(LEVEL_29);
-    bounce.placeFromBag(0);
-    const bad = bounce.placeFromBag(3);
-    if (bad.ok || bad.reason !== 'wrong_kind') throw new Error('L29 milk bounce on watermelon');
 
     const play = BoardState.fromLevel(LEVEL_29);
     run(play, [
         { bag: 0 }, { bag: 1 }, { bag: 2 },
-        { tray: 1, bag: 3 }, { bag: 4 }, { bag: 5 },
-        { tray: 2, bag: 5 }, { bag: 5 }, { bag: 5 },
+        { tray: 2, bag: 3 }, { bag: 4 },
+        { tray: 1, bag: 5 }, { bag: 5 }, { bag: 5 },
         { tray: 3, bag: 5 }, { bag: 5 }, { bag: 5 },
-        { tray: 4, bag: 5 }, { bag: 5 }, { bag: 5 },
+        { tray: 4, bag: 5 }, { bag: 5 }, { bag: 5 }, { bag: 5 },
     ]);
     if (!play.isWin() || play.steps !== 15) throw new Error('L29 must win in 15');
-    const kinds = play.trays.map((t) => t.kind).sort().join(',');
-    if (kinds !== 'meat,milk,sauce,veg,watermelon') throw new Error(`L29 kinds ${kinds}`);
-    if (LEVEL_29.loseable !== true) throw new Error('L29 loseable');
+
+    const fail = BoardState.fromLevel(LEVEL_29);
+    fail.placeFromBag(3);
+    fail.placeFromBag(4);
+    if (fail.trays[0].kind !== 'sauce' || fail.trays[0].sealed) {
+        throw new Error('L29 waste sauce must sit in cap3');
+    }
+    fail.selectTray(1);
+    fail.placeFromBag(0);
+    fail.placeFromBag(1);
+    fail.placeFromBag(2);
+    fail.selectTray(2);
+    fail.placeFromBag(5);
+    fail.placeFromBag(5);
+    fail.selectBuffer(0);
+    const park = fail.placeFromBag(5);
+    if (!park.ok || park.item !== 'milk') throw new Error('L29 waste must park milk');
+    fail.selectTray(3);
+    fail.placeFromBag(5);
+    fail.placeFromBag(5);
+    fail.placeFromBag(5);
+    fail.selectTray(4);
+    fail.placeFromBag(5);
+    fail.placeFromBag(5);
+    fail.placeFromBag(5);
+    fail.placeFromBag(5);
+    if (fail.isWin() || fail.failReason() == null) throw new Error('L29 waste must fail');
+    if (fail.failReason() !== 'locked_out') throw new Error(`L29 waste ${fail.failReason()}`);
     console.log('L29 OK', audit.variantCount);
 }

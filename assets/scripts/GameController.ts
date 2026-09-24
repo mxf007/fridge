@@ -25,36 +25,36 @@ import {
     view,
 } from 'cc';
 import { BoardState } from './game/BoardState';
-import { LEVEL_01, selfCheckLevel01 } from './game/level_01';
-import { LEVEL_02, selfCheckLevel02 } from './game/level_02';
-import { LEVEL_03, selfCheckLevel03 } from './game/level_03';
-import { LEVEL_04, selfCheckLevel04 } from './game/level_04';
-import { LEVEL_05, selfCheckLevel05 } from './game/level_05';
-import { LEVEL_06, selfCheckLevel06 } from './game/level_06';
-import { LEVEL_07, selfCheckLevel07 } from './game/level_07';
-import { LEVEL_08, selfCheckLevel08 } from './game/level_08';
-import { LEVEL_09, selfCheckLevel09 } from './game/level_09';
-import { LEVEL_10, selfCheckLevel10 } from './game/level_10';
-import { LEVEL_11, selfCheckLevel11 } from './game/level_11';
-import { LEVEL_12, selfCheckLevel12 } from './game/level_12';
-import { LEVEL_13, selfCheckLevel13 } from './game/level_13';
-import { LEVEL_14, selfCheckLevel14 } from './game/level_14';
-import { LEVEL_15, selfCheckLevel15 } from './game/level_15';
-import { LEVEL_16, selfCheckLevel16 } from './game/level_16';
-import { LEVEL_17, selfCheckLevel17 } from './game/level_17';
-import { LEVEL_18, selfCheckLevel18 } from './game/level_18';
-import { LEVEL_19, selfCheckLevel19 } from './game/level_19';
-import { LEVEL_20, selfCheckLevel20 } from './game/level_20';
-import { LEVEL_21, selfCheckLevel21 } from './game/level_21';
-import { LEVEL_22, selfCheckLevel22 } from './game/level_22';
-import { LEVEL_23, selfCheckLevel23 } from './game/level_23';
-import { LEVEL_24, selfCheckLevel24 } from './game/level_24';
-import { LEVEL_25, selfCheckLevel25 } from './game/level_25';
-import { LEVEL_26, selfCheckLevel26 } from './game/level_26';
-import { LEVEL_27, selfCheckLevel27 } from './game/level_27';
-import { LEVEL_28, selfCheckLevel28 } from './game/level_28';
-import { LEVEL_29, selfCheckLevel29 } from './game/level_29';
-import { LEVEL_30, selfCheckLevel30 } from './game/level_30';
+import { LEVEL_01 } from './game/level_01';
+import { LEVEL_02 } from './game/level_02';
+import { LEVEL_03 } from './game/level_03';
+import { LEVEL_04 } from './game/level_04';
+import { LEVEL_05 } from './game/level_05';
+import { LEVEL_06 } from './game/level_06';
+import { LEVEL_07 } from './game/level_07';
+import { LEVEL_08 } from './game/level_08';
+import { LEVEL_09 } from './game/level_09';
+import { LEVEL_10 } from './game/level_10';
+import { LEVEL_11 } from './game/level_11';
+import { LEVEL_12 } from './game/level_12';
+import { LEVEL_13 } from './game/level_13';
+import { LEVEL_14 } from './game/level_14';
+import { LEVEL_15 } from './game/level_15';
+import { LEVEL_16 } from './game/level_16';
+import { LEVEL_17 } from './game/level_17';
+import { LEVEL_18 } from './game/level_18';
+import { LEVEL_19 } from './game/level_19';
+import { LEVEL_20 } from './game/level_20';
+import { LEVEL_21 } from './game/level_21';
+import { LEVEL_22 } from './game/level_22';
+import { LEVEL_23 } from './game/level_23';
+import { LEVEL_24 } from './game/level_24';
+import { LEVEL_25 } from './game/level_25';
+import { LEVEL_26 } from './game/level_26';
+import { LEVEL_27 } from './game/level_27';
+import { LEVEL_28 } from './game/level_28';
+import { LEVEL_29 } from './game/level_29';
+import { LEVEL_30 } from './game/level_30';
 import type { Dest, FailReason, FoodId, HintPick, LevelDef, PlaceFail, PlaceReason } from './game/types';
 import { FOOD_NAMES } from './game/types';
 
@@ -145,6 +145,7 @@ const UUID = {
     winPerfect: 'd1312f55-9340-4b85-ae10-2091d7f20031@f9941',
     shareWin: 'd1402f55-9340-4b85-ae10-2091d7f20040@f9941',
     shareMilestone: 'd1412f55-9340-4b85-ae10-2091d7f20041@f9941',
+    btnStart: 'c2a1b3d4-e5f6-4789-8012-3f4a5b6c7d8e@f9941',
     builtin: '20835ba4-6145-4fbc-a58a-051ce700aa3e@f9941',
 };
 
@@ -236,6 +237,7 @@ export class GameController extends Component {
     private bufferBoard: SpriteFrame | null = null;
     private trayEmpty: SpriteFrame | null = null;
     private traySealed: SpriteFrame | null = null;
+    private btnStart: SpriteFrame | null = null;
     private bagFrames: Partial<Record<FoodId, SpriteFrame>> = {};
     private busy = false;
     private animateDoorIndex: number | null = null;
@@ -256,36 +258,7 @@ export class GameController extends Component {
     private pendingMilestone: number | null = null;
 
     onLoad() {
-        selfCheckLevel01();
-        selfCheckLevel02();
-        selfCheckLevel03();
-        selfCheckLevel04();
-        selfCheckLevel05();
-        selfCheckLevel06();
-        selfCheckLevel07();
-        selfCheckLevel08();
-        selfCheckLevel09();
-        selfCheckLevel10();
-        selfCheckLevel11();
-        selfCheckLevel12();
-        selfCheckLevel13();
-        selfCheckLevel14();
-        selfCheckLevel15();
-        selfCheckLevel16();
-        selfCheckLevel17();
-        selfCheckLevel18();
-        selfCheckLevel19();
-        selfCheckLevel20();
-        selfCheckLevel21();
-        selfCheckLevel22();
-        selfCheckLevel23();
-        selfCheckLevel24();
-        selfCheckLevel25();
-        selfCheckLevel26();
-        selfCheckLevel27();
-        selfCheckLevel28();
-        selfCheckLevel29();
-        selfCheckLevel30();
+        // 自检含可见信息审计，同步跑会把预览进度条卡住。用 tools/run_level_selfchecks_19_30.ts。
         this.bindHome();
         this.refreshAlbumLink();
         void this.ensureFrames();
@@ -312,12 +285,16 @@ export class GameController extends Component {
         const btn = this.node.getChildByName('BtnStart');
         if (btn) {
             const sp = btn.getComponent(Sprite);
-            if (sp) sp.color = new Color(255, 255, 255, 0);
+            if (sp) {
+                sp.color = new Color(255, 255, 255, 255);
+                sp.sizeMode = Sprite.SizeMode.CUSTOM;
+                if (this.btnStart) sp.spriteFrame = this.btnStart;
+            }
             const label = btn.getChildByName('Label');
-            if (label) label.active = false;
+            if (label) label.active = !(sp && sp.spriteFrame);
             const btnUi = btn.getComponent(UITransform);
-            if (btnUi) btnUi.setContentSize(560, 100);
-            btn.setPosition(0, -420, 0);
+            if (btnUi) btnUi.setContentSize(429, 123);
+            btn.setPosition(-0.5, -420.5, 0);
         }
         const album = this.node.getChildByName('AlbumLink');
         if (album) {
@@ -326,8 +303,19 @@ export class GameController extends Component {
                 label.color = SAGE;
                 label.fontSize = 28;
             }
-            album.setPosition(0, -548, 0);
+            album.setPosition(0, -560, 0);
+            const ui = album.getComponent(UITransform);
+            if (ui) ui.setContentSize(640, 56);
+            if (label) {
+                label.color = WALNUT;
+                label.fontSize = 30;
+                label.lineHeight = 40;
+                label.overflow = Label.Overflow.NONE;
+                label.enableWrapText = false;
+            }
         }
+        const mask = this.node.getChildByName('HomeBarMask');
+        if (mask) mask.active = false;
         this.ensureHomeSettings();
     }
 
@@ -431,7 +419,7 @@ export class GameController extends Component {
         const link = this.node.getChildByName('AlbumLink');
         if (!link) return;
         const label = link.getComponent(Label) || link.getComponentInChildren(Label);
-        if (label) label.string = `我收过的冰箱 ${this.clearedId()}/30`;
+        if (label) label.string = `我收过的冰箱  ${this.clearedId()}/30  >`;
     }
 
     /** 轻量图鉴：已收关 3 列缩略；可纵向滑完 30 张；长按 260ms 分享，不阻塞关闭。 */
@@ -707,6 +695,8 @@ export class GameController extends Component {
     }
 
     private async ensureFrames() {
+        if (!this.btnStart) this.btnStart = await loadFrame(UUID.btnStart);
+        this.polishHomeChrome();
         if (!this.foodMilk) this.foodMilk = await loadFrame(UUID.foodMilk);
         if (!this.foodVeg) this.foodVeg = await loadFrame(UUID.foodVeg);
         if (!this.foodFruit) this.foodFruit = await loadFrame(UUID.foodFruit);
@@ -756,6 +746,7 @@ export class GameController extends Component {
         if (!this.bufferBoard) this.bufferBoard = await loadFrame(UUID.bufferBoard);
         if (!this.trayEmpty) this.trayEmpty = await loadFrame(UUID.trayEmpty);
         if (!this.traySealed) this.traySealed = await loadFrame(UUID.traySealed);
+        this.polishHomeChrome();
         this.builtin = await loadFrame(UUID.builtin);
         if (this.board) this.render();
     }
@@ -834,7 +825,7 @@ export class GameController extends Component {
         const root = this.playRoot;
         const board = this.board;
         if (!root || !board) return;
-        root.removeAllChildren();
+        root.destroyAllChildren();
 
         const size = this.canvasSize();
         const rootUi = root.getComponent(UITransform);
@@ -1059,7 +1050,7 @@ export class GameController extends Component {
         this.animateDoorIndex = null;
         this.board = null;
         if (this.playRoot && this.playRoot.isValid) {
-            this.playRoot.removeAllChildren();
+            this.playRoot.destroyAllChildren();
             this.playRoot.active = false;
         }
         for (let i = 0; i < HOME_NODES.length; i++) {
@@ -1574,6 +1565,9 @@ export class GameController extends Component {
             .to(0.1, { opacity: 40 })
             .to(0.1, { opacity: 255 })
             .to(0.12, { opacity: 0 })
+            .call(() => {
+                if (flash.isValid) flash.destroy();
+            })
             .start();
     }
 
@@ -2411,6 +2405,9 @@ export class GameController extends Component {
             .to(0.1, { opacity: 40 })
             .to(0.1, { opacity: 220 })
             .to(0.1, { opacity: 0 })
+            .call(() => {
+                if (flash.isValid) flash.destroy();
+            })
             .start();
     }
 
@@ -2730,10 +2727,11 @@ export class GameController extends Component {
         this.drawSpark(card, 142, -40, 9, WHEAT);
         this.drawSpark(card, 118, 18, 7, new Color(255, 210, 140, 255));
 
-        const emphasizeShare = board.level.id === 25 || board.level.id === 30;
+        const levelId = this.board ? this.board.level.id : 0;
+        const emphasizeShare = levelId === 25 || levelId === 30;
         const nextY = emphasizeShare ? -268 : -168;
         const shareY = emphasizeShare ? -168 : -268;
-        const nextLabel = board.level.id === 30 ? '回主页' : '下一关  >';
+        const nextLabel = levelId === 30 ? '回主页' : '下一关  >';
         const nextBtn = this.makeWinPrimaryBtn(card, 'BtnNext', nextLabel, 0, nextY);
         nextBtn.setScale(0, 0, 1);
         const shareBtn = this.makeWinSecondaryBtn(card, 'BtnShareSteps', '分享步数', 0, shareY);

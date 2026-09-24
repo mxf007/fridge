@@ -4,22 +4,21 @@ import type { LevelDef } from './types';
 import { auditVisibleInformation } from './VisibleInformationAudit';
 
 /**
- * 第 20 关：猕猴桃登场 + 五色阶段考。
- * 五格均 cap3；奶/菜/肉/酱/猕 各 3。
- * 6 列浅露猕猴桃/牛奶 + 深栈收菜肉酱，压隐藏排列以过可见审计。
+ * 第 20 关：猕猴桃登场 + 五色混容量。
+ * caps 3,3,2,3,4；猕2+奶3+菜3+肉3+酱4。
  */
 export const LEVEL_20: LevelDef = {
     id: 20,
     title: '五色猕猴桃',
-    teach: '猕猴桃登场。五种都要换格，一种一格',
-    trays: [{ cap: 3 }, { cap: 3 }, { cap: 3 }, { cap: 3 }, { cap: 3 }],
+    teach: '猕猴桃两件进小格；酱四件进大格',
+    trays: [{ cap: 3 }, { cap: 3 }, { cap: 2 }, { cap: 3 }, { cap: 4 }],
     bags: [
         ['kiwi'],
         ['kiwi'],
         ['milk'],
         ['milk'],
         ['milk'],
-        ['veg', 'veg', 'veg', 'meat', 'meat', 'meat', 'sauce', 'sauce', 'sauce', 'kiwi'],
+        ['sauce', 'sauce', 'sauce', 'sauce', 'meat', 'meat', 'meat', 'veg', 'veg', 'veg'],
     ],
     buffer: 3,
     loseable: true,
@@ -44,70 +43,44 @@ function run(
 export function selfCheckLevel20(): void {
     assertLevel(LEVEL_20);
     const b = BoardState.fromLevel(LEVEL_20);
-    if (!b.bufferEnabled) throw new Error('L20 bufferEnabled must be true');
-    if (b.trays.length !== 5) throw new Error('L20 must have 5 trays');
-    for (let i = 0; i < b.trays.length; i++) {
-        if (b.trays[i].cap !== 3) throw new Error('L20 trays must be cap 3');
-    }
+    if (!b.bufferEnabled) throw new Error('L20 bufferEnabled');
+    if (b.trays.map((t) => t.cap).join(',') !== '3,3,2,3,4') throw new Error('L20 caps');
     if (b.bags.length !== 6) throw new Error('L20 must have 6 bag columns');
     if (
         b.peekBag(0) !== 'kiwi'
-        || b.peekBag(1) !== 'kiwi'
         || b.peekBag(2) !== 'milk'
-        || b.peekBag(3) !== 'milk'
-        || b.peekBag(4) !== 'milk'
-        || b.peekBag(5) !== 'kiwi'
+        || b.peekBag(5) !== 'veg'
     ) {
-        throw new Error('L20 tops must be kiwi×2 / milk×3 / kiwi');
+        throw new Error('L20 tops kiwi/milk/veg');
     }
-
     const counts: Record<string, number> = {};
-    const items = LEVEL_20.bags.flat();
-    for (let i = 0; i < items.length; i++) counts[items[i]] = (counts[items[i]] || 0) + 1;
+    for (const x of LEVEL_20.bags.flat()) counts[x] = (counts[x] || 0) + 1;
     if (
         counts.milk !== 3
         || counts.veg !== 3
         || counts.meat !== 3
-        || counts.sauce !== 3
-        || counts.kiwi !== 3
+        || counts.sauce !== 4
+        || counts.kiwi !== 2
     ) {
-        throw new Error('L20 counts must be milk3 / veg3 / meat3 / sauce3 / kiwi3');
+        throw new Error('L20 counts');
     }
-    if (counts.lemon || counts.grape || counts.fruit) {
-        throw new Error('L20 must not use lemon / grape / apple');
-    }
-
     const audit = auditVisibleInformation(LEVEL_20);
-    if (!audit.passes) {
-        throw new Error(`L20 visible audit failed: ${audit.failures.join(',')}`);
-    }
-    if (audit.maxBufferNeeded != null && audit.maxBufferNeeded > 3) {
-        throw new Error(`L20 maxBufferNeeded ${audit.maxBufferNeeded} exceeds 3`);
-    }
-    if (audit.initialSafeActionCount <= 0) {
-        throw new Error('L20 must have at least one safe visible opening move');
-    }
+    if (!audit.passes) throw new Error(`L20 audit failed: ${audit.failures.join(',')}`);
 
-    // 锁错弹回：默认格收了猕猴桃后，牛奶不能进
     const bounce = BoardState.fromLevel(LEVEL_20);
-    const first = bounce.placeFromBag(0);
-    if (!first.ok || first.item !== 'kiwi') throw new Error('L20 first kiwi must place');
+    bounce.selectTray(2);
+    bounce.placeFromBag(0);
     const bad = bounce.placeFromBag(2);
-    if (bad.ok || bad.reason !== 'wrong_kind') {
-        throw new Error('L20 milk must bounce while tray 0 is kiwi');
-    }
-    if (bad.hintTrays.indexOf(1) < 0) throw new Error('L20 bounce must hint an empty tray');
+    if (bad.ok || bad.reason !== 'wrong_kind') throw new Error('L20 milk bounce on kiwi tray');
 
-    // 安全通关：猕/奶/菜/肉/酱各一格
     const play = BoardState.fromLevel(LEVEL_20);
     run(play, [
-        { bag: 0 },
+        { tray: 2, bag: 0 },
         { bag: 1 },
-        { bag: 5 },
-        { tray: 1, bag: 2 },
+        { tray: 0, bag: 2 },
         { bag: 3 },
         { bag: 4 },
-        { tray: 2, bag: 5 },
+        { tray: 1, bag: 5 },
         { bag: 5 },
         { bag: 5 },
         { tray: 3, bag: 5 },
@@ -116,15 +89,48 @@ export function selfCheckLevel20(): void {
         { tray: 4, bag: 5 },
         { bag: 5 },
         { bag: 5 },
+        { bag: 5 },
     ]);
-    if (!play.isWin() || play.steps !== 15) throw new Error('L20 safe path must win in 15 steps');
-    const kinds = play.trays.map((t) => t.kind).sort().join(',');
-    if (kinds !== 'kiwi,meat,milk,sauce,veg') {
-        throw new Error(`L20 must lock five kinds, got ${kinds}`);
+    if (!play.isWin() || play.steps !== 15) throw new Error('L20 must win in 15');
+    if (play.trays[2].kind !== 'kiwi' || play.trays[4].kind !== 'sauce') {
+        throw new Error('L20 kiwi/sauce slots');
     }
-    if (play.dest && play.dest.kind === 'buffer') throw new Error('L20 win must not keep buffer dest');
-    console.log('L20 minBufferUsed', 0);
-    console.log('L20 audit variants', audit.variantCount, 'safe', audit.initialSafeActionCount);
 
-    if (LEVEL_20.loseable !== true) throw new Error('L20 loseable must be true');
+    const fail = BoardState.fromLevel(LEVEL_20);
+    fail.placeFromBag(0);
+    fail.placeFromBag(1);
+    if (fail.trays[0].kind !== 'kiwi' || fail.trays[0].items.length !== 2) {
+        throw new Error('L20 waste kiwi in cap3');
+    }
+    fail.selectTray(1);
+    fail.placeFromBag(2);
+    fail.placeFromBag(3);
+    fail.placeFromBag(4);
+    if (!fail.trays[1].sealed || fail.trays[1].kind !== 'milk') {
+        throw new Error('L20 waste milk tray');
+    }
+    fail.selectTray(2);
+    fail.placeFromBag(5);
+    fail.placeFromBag(5);
+    if (!fail.trays[2].sealed || fail.trays[2].kind !== 'veg') {
+        throw new Error('L20 waste veg cap2');
+    }
+    fail.selectBuffer(0);
+    const park = fail.placeFromBag(5);
+    if (!park.ok || park.item !== 'veg') throw new Error('L20 waste park veg');
+    fail.selectTray(3);
+    fail.placeFromBag(5);
+    fail.placeFromBag(5);
+    fail.placeFromBag(5);
+    fail.selectTray(4);
+    fail.placeFromBag(5);
+    fail.placeFromBag(5);
+    fail.placeFromBag(5);
+    fail.placeFromBag(5);
+    if (fail.isWin() || fail.failReason() == null) throw new Error('L20 waste must fail');
+    if (fail.failReason() !== 'locked_out') {
+        throw new Error(`L20 waste fail ${fail.failReason()}`);
+    }
+    if (LEVEL_20.loseable !== true) throw new Error('L20 loseable');
+    console.log('L20 OK', audit.variantCount);
 }

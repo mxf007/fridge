@@ -70,18 +70,18 @@ const DOOR = new Color(198, 202, 198, 255);
 const HANDLE = new Color(168, 172, 168, 255);
 const CORAL = new Color(224, 122, 95, 255);
 const SAGE = new Color(122, 158, 126, 255);
-/** 选中格呼吸描边：淡靛蓝主色 + 更浅外晕 */
-const SELECT_PULSE_BLUE = new Color(118, 142, 232, 255);
+/** 选中格呼吸描边：蓝主色 + 更浅外晕 */
+const SELECT_PULSE_BLUE = new Color(70, 110, 220, 255);
 const SELECT_PULSE_BLUE_SOFT = new Color(168, 186, 248, 255);
 
-const Y_TRAY = 250;
 const Y_BUFFER = -524;
 /** ≥5 列折两排：前排靠柜台，后排靠冰箱；深栈进后排。 */
 const BAG_TWO_ROW_MIN = 5;
 const BAG_BACK_SCALE = 0.92;
 const BAG_FRONT_SEAT_Y = -380;
 const BAG_ROW_GAP = 112;
-const BAG_TOP_LIMIT = 36;
+/** 栈顶屏幕 y=632，木框底留白 24。 */
+const BAG_TOP_LIMIT = 8;
 /** buffer_board.png 720×220 上三格奶油盘：中心相对木板中心（Y 向上）。 */
 const BUF_BOARD_W = 720;
 const BUF_BOARD_H = 220;
@@ -1063,46 +1063,152 @@ export class GameController extends Component {
         return board.trays.some((t) => t.cap !== cap0);
     }
 
-    private trayY(): number {
-        return Y_TRAY;
+    /** 屏幕左上 y → Cocos 中心原点。 */
+    private screenToCocosY(screenY: number): number {
+        return 640 - screenY;
     }
 
-    /** 胡桃木色外框 + 冷光内腔；收满后灰门合上。n=5 走窄版，n≤4 保持 1–18 外观。 */
-    private trayMetrics(cap: number) {
-        const n = this.board ? this.board.trays.length : 2;
-        if (n >= 5) {
-            // 目标：scale1 外宽 132、外高 300；大/中/小 = 1.0 / 0.85 / 0.70；5 格 + gap10 ≤ 720
-            const scale = cap >= 4 ? 1 : cap <= 2 ? 0.7 : 0.85;
-            const slotW = 100 * scale;
-            const slotH = 268 * scale;
-            const frame = 16 * scale;
-            return { slotW, slotH, frame, outerW: slotW + frame * 2, outerH: slotH + frame * 2, cap };
+    /**
+     * 相同容量同外形。竖格从大到小整组装入，最多 4 个；
+     * 下一档会超过 4 个时，这一档和更小的全部横放。
+     */
+    private trayOrient(caps: number[]): boolean[] {
+        const horizontal = caps.map(() => false);
+        let used = 0;
+        let overflow = false;
+        for (const cap of [4, 3, 2]) {
+            const idx: number[] = [];
+            for (let i = 0; i < caps.length; i++) if (caps[i] === cap) idx.push(i);
+            if (idx.length === 0) continue;
+            if (overflow || used + idx.length > 4) {
+                overflow = true;
+                for (let n = 0; n < idx.length; n++) horizontal[idx[n]] = true;
+            } else {
+                used += idx.length;
+            }
         }
-        const mixed = !!(this.board && this.board.trays.some((t) => t.cap !== this.board!.trays[0].cap));
-        let scale = cap >= 4 ? 1.15 : cap <= 2 ? 0.85 : 1;
-        if (mixed) scale = cap >= 4 ? 1.05 : cap <= 2 ? 0.72 : 0.9;
-        else if (n >= 4 && cap >= 3) scale = Math.min(scale, 0.88);
-        const slotW = 140 * scale;
-        const slotH = 340 * scale;
-        const frame = 18 * scale;
-        return { slotW, slotH, frame, outerW: slotW + frame * 2, outerH: slotH + frame * 2, cap };
+        return horizontal;
+    }
+
+    private trayLayout(board: BoardState): {
+        horizontal: boolean;
+        x: number;
+        y: number;
+        slotW: number;
+        slotH: number;
+        frame: number;
+        outerW: number;
+        outerH: number;
+        cap: number;
+    }[] {
+        const caps = board.trays.map((t) => t.cap);
+        const horizontal = this.trayOrient(caps);
+        const vIdx: number[] = [];
+        const hIdx: number[] = [];
+        for (let i = 0; i < caps.length; i++) (horizontal[i] ? hIdx : vIdx).push(i);
+        const vCount = vIdx.length;
+        const hasDrawer = hIdx.length > 0;
+        let vOuterW = 148;
+        let vOuterH = 260;
+        let vFrame = 16;
+        let vGap = 14;
+        if (!hasDrawer) {
+            if (vCount <= 1) {
+                vOuterW = 280;
+                vOuterH = 420;
+                vFrame = 22;
+            } else if (vCount === 2) {
+                vOuterW = 240;
+                vOuterH = 380;
+                vFrame = 20;
+                vGap = 24;
+            } else if (vCount === 3) {
+                vOuterW = 200;
+                vOuterH = 320;
+                vFrame = 18;
+                vGap = 20;
+            }
+        }
+        const vY = hasDrawer
+            ? this.screenToCocosY((336 + 596) / 2)
+            : this.screenToCocosY(180 + vOuterH / 2);
+        const hY = this.screenToCocosY((180 + 284) / 2);
+        const hOuterH = 104;
+        const hFrame = 14;
+        const hGap = 14;
+        const out: {
+            horizontal: boolean;
+            x: number;
+            y: number;
+            slotW: number;
+            slotH: number;
+            frame: number;
+            outerW: number;
+            outerH: number;
+            cap: number;
+        }[] = caps.map((cap) => ({
+            horizontal: false,
+            x: 0,
+            y: vY,
+            slotW: vOuterW - vFrame * 2,
+            slotH: vOuterH - vFrame * 2,
+            frame: vFrame,
+            outerW: vOuterW,
+            outerH: vOuterH,
+            cap,
+        }));
+        let vTotal = vGap * Math.max(vCount - 1, 0) + vOuterW * vCount;
+        let cursor = -vTotal / 2;
+        for (let n = 0; n < vIdx.length; n++) {
+            const i = vIdx[n];
+            out[i].x = cursor + vOuterW / 2;
+            out[i].y = vY;
+            cursor += vOuterW + vGap;
+        }
+        const hWidths = hIdx.map((i) => (caps[i] <= 2 ? 150 : 210));
+        let hTotal = hGap * Math.max(hIdx.length - 1, 0);
+        for (let n = 0; n < hWidths.length; n++) hTotal += hWidths[n];
+        if (hTotal > 660 && hIdx.length > 0) {
+            const gaps = hGap * Math.max(hIdx.length - 1, 0);
+            const scale = (660 - gaps) / (hTotal - gaps);
+            for (let n = 0; n < hWidths.length; n++) hWidths[n] = Math.floor(hWidths[n] * scale);
+            hTotal = 660;
+        }
+        cursor = -hTotal / 2;
+        for (let n = 0; n < hIdx.length; n++) {
+            const i = hIdx[n];
+            const outerW = hWidths[n];
+            out[i].horizontal = true;
+            out[i].outerW = outerW;
+            out[i].outerH = hOuterH;
+            out[i].frame = hFrame;
+            out[i].slotW = outerW - hFrame * 2;
+            out[i].slotH = hOuterH - hFrame * 2;
+            out[i].x = cursor + outerW / 2;
+            out[i].y = hY;
+            cursor += outerW + hGap;
+        }
+        return out;
+    }
+
+    private trayAt(index: number) {
+        const board = this.board;
+        const layout = board ? this.trayLayout(board) : null;
+        if (layout && layout[index]) return layout[index];
+        return {
+            horizontal: false, x: 0, y: 174, slotW: 116, slotH: 228, frame: 16, outerW: 148, outerH: 260, cap: 4,
+        };
     }
 
     private drawTrays(root: Node, board: BoardState) {
         const n = board.trays.length;
-        const gap = n >= 5 ? 10 : n >= 4 ? 12 : 24;
-        const metrics = board.trays.map((t) => this.trayMetrics(t.cap));
-        let total = gap * Math.max(n - 1, 0);
-        for (let i = 0; i < n; i++) total += metrics[i].outerW;
-        let cursor = -total / 2;
+        const metrics = this.trayLayout(board);
         for (let i = 0; i < n; i++) {
             const tray = board.trays[i];
             const m = metrics[i];
-            const x = cursor + m.outerW / 2;
-            cursor += m.outerW + gap;
             const node = new Node(`Tray${i}`);
             node.layer = UI_2D;
-            node.setPosition(x, this.trayY(), 0);
+            node.setPosition(m.x, m.y, 0);
             node.addComponent(UITransform).setContentSize(m.outerW, m.outerH);
             root.addChild(node);
 
@@ -1116,28 +1222,23 @@ export class GameController extends Component {
             g.fillColor = selected ? WALNUT : FRAME;
             g.roundRect(-m.outerW / 2, -m.outerH / 2, m.outerW, m.outerH, 28);
             g.fill();
-            if (selected) {
-                g.lineWidth = 8;
-                g.strokeColor = CORAL;
-                g.roundRect(-m.outerW / 2 + 4, -m.outerH / 2 + 4, m.outerW - 8, m.outerH - 8, 24);
-                g.stroke();
-            }
             if (closed) {
                 this.paintDoor(g, m.slotW, m.slotH);
             } else {
                 g.fillColor = selected ? new Color(245, 252, 255, 255) : new Color(198, 210, 214, 255);
-                g.roundRect(-m.slotW / 2, -m.slotH / 2, m.slotW, m.slotH, 20);
+                g.roundRect(-m.slotW / 2, -m.slotH / 2, m.slotW, m.slotH, m.horizontal ? 14 : 20);
                 g.fill();
+                const glowR = m.horizontal ? 12 : (selected ? 22 : 16);
+                const glowY = m.slotH / 2 - (m.horizontal ? 16 : 28);
                 g.fillColor = selected ? new Color(255, 255, 255, 200) : new Color(255, 255, 255, 70);
-                g.circle(0, m.slotH / 2 - 28, selected ? 28 : 18);
+                g.circle(0, glowY, glowR);
                 g.fill();
             }
             node.addChild(gNode);
-            if (selected && !closed) node.setScale(1.06, 1.06, 1);
 
             if (!closed) {
-                if (this.mixedCaps()) this.drawCapacityLayers(node, m, tray.cap, tray.items.length);
-                this.drawFoodsInTray(node, tray.items, m.slotH, tray.cap);
+                this.drawCapacityLayers(node, m, tray.cap, tray.items.length, m.horizontal);
+                this.drawFoodsInTray(node, tray.items, m.slotW, m.slotH, tray.cap, m.horizontal);
             }
 
             if (closing && tray.sealed) {
@@ -1159,12 +1260,11 @@ export class GameController extends Component {
             }
 
             if (selected && !closed) {
-                this.drawCoralFramePulse(node, m.outerW, m.outerH, 4, 24);
-                this.drawPlaceHereTag(node, m.outerH / 2 + 28);
+                this.drawCoralFramePulse(node, m.outerW, m.outerH, 4, m.horizontal ? 16 : 24);
             }
 
             node.on(Node.EventType.TOUCH_END, () => {
-                if (!this.board || this.busy || this.board.isWin()) return;
+                if (!this.board || this.busy || this.board.isWin() || tray.sealed) return;
                 if (this.holdHintTrays.indexOf(i) >= 0) this.holdHintTrays = [];
                 this.holdHintBuffers = [];
                 this.board.selectTray(i);
@@ -1177,8 +1277,9 @@ export class GameController extends Component {
         g.fillColor = DOOR;
         g.roundRect(-slotW / 2, -slotH / 2, slotW, slotH, 20);
         g.fill();
+        const handleH = Math.min(72, Math.max(28, Math.round(slotH * 0.46)));
         g.fillColor = HANDLE;
-        g.roundRect(slotW / 2 - 22, -36, 12, 72, 6);
+        g.roundRect(slotW / 2 - 20, -handleH / 2, 10, handleH, 5);
         g.fill();
     }
 
@@ -1193,8 +1294,9 @@ export class GameController extends Component {
         g.fillColor = DOOR;
         g.roundRect(-slotW, -slotH / 2, slotW, slotH, 20);
         g.fill();
+        const handleH = Math.min(72, Math.max(28, Math.round(slotH * 0.46)));
         g.fillColor = HANDLE;
-        g.roundRect(-22, -36, 12, 72, 6);
+        g.roundRect(-20, -handleH / 2, 10, handleH, 5);
         g.fill();
         return door;
     }
@@ -1254,6 +1356,36 @@ export class GameController extends Component {
         return false;
     }
 
+    /** 竖格里食物一列往上叠。横屉里并排。不在内腔再画座位格子。 */
+    private seatBox(
+        slotW: number,
+        slotH: number,
+        cap: number,
+        index: number,
+        horizontal: boolean,
+    ): { x: number; y: number; w: number; h: number } {
+        if (horizontal) {
+            const pad = 8;
+            const gap = 8;
+            const w = (slotW - pad * 2 - gap * (cap - 1)) / cap;
+            const h = slotH * 0.72;
+            const x = -slotW / 2 + pad + index * (w + gap) + w / 2;
+            return { x, y: 0, w, h };
+        }
+        const pad = 16;
+        const gap = 8;
+        const h = (slotH - pad * 2 - gap * (cap - 1)) / cap;
+        const w = slotW * 0.72;
+        const y = -slotH / 2 + pad + index * (h + gap) + h / 2;
+        return { x: 0, y, w, h };
+    }
+
+    private foodSlotX(slotW: number, cap: number, index: number): number {
+        const pad = 10;
+        const step = (slotW - pad * 2) / Math.max(cap, 1);
+        return -slotW / 2 + pad + step * (index + 0.5);
+    }
+
     private foodSlotY(slotH: number, cap: number, index: number): number {
         const pad = 16;
         const step = (slotH - pad * 2) / Math.max(cap, 1);
@@ -1271,28 +1403,27 @@ export class GameController extends Component {
         m: { slotW: number; slotH: number },
         cap: number,
         filled: number,
+        horizontal = false,
     ) {
         const layers = new Node('Layers');
         layers.layer = UI_2D;
         layers.addComponent(UITransform).setContentSize(m.slotW, m.slotH);
         const g = layers.addComponent(Graphics);
-        const pad = 18;
-        const step = (m.slotH - pad * 2) / cap;
-        const h = Math.max(step - 8, 22);
-        const w = m.slotW * 0.7;
         for (let i = 0; i < cap; i++) {
-            const y = this.foodSlotY(m.slotH, cap, i);
+            const seat = this.seatBox(m.slotW, m.slotH, cap, i, horizontal);
+            const x = seat.x - seat.w / 2;
+            const y = seat.y - seat.h / 2;
             if (i < filled) {
                 g.fillColor = new Color(255, 255, 255, 16);
-                g.roundRect(-w / 2, y - h / 2, w, h, 10);
+                g.roundRect(x, y, seat.w, seat.h, 10);
                 g.fill();
             } else {
                 g.fillColor = new Color(255, 253, 248, 42);
-                g.roundRect(-w / 2, y - h / 2, w, h, 10);
+                g.roundRect(x, y, seat.w, seat.h, 10);
                 g.fill();
                 g.strokeColor = new Color(255, 253, 248, 170);
                 g.lineWidth = 2;
-                g.roundRect(-w / 2, y - h / 2, w, h, 10);
+                g.roundRect(x, y, seat.w, seat.h, 10);
                 g.stroke();
             }
         }
@@ -1452,7 +1583,7 @@ export class GameController extends Component {
         if (!root || !board) return;
         const tray = root.getChildByName(`Tray${index}`);
         if (!tray) return;
-        const m = this.trayMetrics(board.trays[index].cap);
+        const m = this.trayAt(index);
         const cap = board.trays[index].cap;
         const filled = board.trays[index].items.length;
         const flash = new Node('CapFlash');
@@ -1461,13 +1592,9 @@ export class GameController extends Component {
         const g = flash.addComponent(Graphics);
         g.strokeColor = CORAL;
         g.lineWidth = 5;
-        const pad = 18;
-        const step = (m.slotH - pad * 2) / cap;
-        const h = Math.max(step - 8, 22);
-        const w = m.slotW * 0.7;
         for (let i = filled; i < cap; i++) {
-            const y = this.foodSlotY(m.slotH, cap, i);
-            g.roundRect(-w / 2, y - h / 2, w, h, 10);
+            const seat = this.seatBox(m.slotW, m.slotH, cap, i, m.horizontal);
+            g.roundRect(seat.x - seat.w / 2, seat.y - seat.h / 2, seat.w, seat.h, 10);
             g.stroke();
         }
         const op = flash.addComponent(UIOpacity);
@@ -1492,8 +1619,16 @@ export class GameController extends Component {
         }
     }
 
-    /** 选中框呼吸：细蓝描边 schedule 重绘 alpha。 */
-    private drawCoralFramePulse(parent: Node, w: number, h: number, inset: number, radius: number) {
+    /** 选中框呼吸：描边 schedule 重绘 alpha。 */
+    private drawCoralFramePulse(
+        parent: Node,
+        w: number,
+        h: number,
+        inset: number,
+        radius: number,
+        ring: Color = SELECT_PULSE_BLUE,
+        soft: Color = SELECT_PULSE_BLUE_SOFT,
+    ) {
         const pulse = new Node('CoralPulse');
         pulse.layer = UI_2D;
         pulse.addComponent(UITransform).setContentSize(w + 24, h + 24);
@@ -1507,21 +1642,16 @@ export class GameController extends Component {
             g.clear();
             const ha = Math.min(255, Math.max(0, Math.round(haloA)));
             const ra = Math.min(255, Math.max(0, Math.round(ringA)));
-            g.lineWidth = 7;
-            g.strokeColor = new Color(
-                SELECT_PULSE_BLUE_SOFT.r,
-                SELECT_PULSE_BLUE_SOFT.g,
-                SELECT_PULSE_BLUE_SOFT.b,
-                ha,
-            );
-            g.roundRect(x - 6, y - 6, rw + 12, rh + 12, radius + 5);
+            g.lineWidth = 16;
+            g.strokeColor = new Color(soft.r, soft.g, soft.b, ha);
+            g.roundRect(x - 10, y - 10, rw + 20, rh + 20, radius + 8);
             g.stroke();
-            g.lineWidth = 3;
-            g.strokeColor = new Color(SELECT_PULSE_BLUE.r, SELECT_PULSE_BLUE.g, SELECT_PULSE_BLUE.b, ra);
-            g.roundRect(x - 1, y - 1, rw + 2, rh + 2, radius + 1);
+            g.lineWidth = 6;
+            g.strokeColor = new Color(ring.r, ring.g, ring.b, ra);
+            g.roundRect(x - 2, y - 2, rw + 4, rh + 4, radius + 2);
             g.stroke();
         };
-        paint(70, 140);
+        paint(160, 230);
         parent.addChild(pulse);
         let phase = 0;
         const tick = () => {
@@ -1531,27 +1661,9 @@ export class GameController extends Component {
             }
             phase += 0.07;
             const k = (Math.sin(phase) + 1) * 0.5;
-            paint(45 + k * 150, 75 + k * 130);
+            paint(90 + k * 165, 160 + k * 95);
         };
         this.schedule(tick, 0.033);
-    }
-
-    /** 槽上方矩形 +「放这里」。 */
-    private drawPlaceHereTag(parent: Node, y: number) {
-        const tag = new Node('PlaceHere');
-        tag.layer = UI_2D;
-        tag.setPosition(0, y, 0);
-        tag.addComponent(UITransform).setContentSize(116, 34);
-        const g = tag.addComponent(Graphics);
-        g.fillColor = MILK;
-        g.roundRect(-58, -17, 116, 34, 6);
-        g.fill();
-        g.strokeColor = CORAL;
-        g.lineWidth = 2;
-        g.roundRect(-58, -17, 116, 34, 6);
-        g.stroke();
-        this.addLabel(tag, 'Txt', '放这里', 22, WALNUT, 108, 30);
-        parent.addChild(tag);
     }
 
     private drawSwitchGuide(tray: Node, m: { outerW: number; outerH: number }, tipText = '点这格') {
@@ -1639,11 +1751,27 @@ export class GameController extends Component {
             .start();
     }
 
-    private drawFoodsInTray(node: Node, items: FoodId[], slotH: number, cap = 4, centerY = 0) {
-        const size = this.trayFoodSize(slotH, cap);
+    private drawFoodsInTray(
+        node: Node,
+        items: FoodId[],
+        slotW: number,
+        slotH: number,
+        cap = 4,
+        horizontal = false,
+    ) {
         for (let k = 0; k < items.length; k++) {
-            const fy = centerY + this.foodSlotY(slotH, cap, k);
-            this.addSprite(node, `Food${k}`, this.frameForFood(items[k]), size.w, size.h, 0, fy, Color.WHITE);
+            const seat = this.seatBox(slotW, slotH, cap, k, horizontal);
+            const food = Math.min(seat.w * 0.82, seat.h * 0.82);
+            this.addSprite(
+                node,
+                `Food${k}`,
+                this.frameForFood(items[k]),
+                food,
+                food,
+                seat.x,
+                seat.y,
+                Color.WHITE,
+            );
         }
     }
 
@@ -1656,7 +1784,9 @@ export class GameController extends Component {
         food: number;
     } {
         const gap = columns <= 3 ? 28 : 16;
-        const w = Math.min(188, Math.floor((680 - gap * Math.max(columns - 1, 0)) / Math.max(columns, 1)));
+        const fit = Math.floor((660 - gap * Math.max(columns - 1, 0)) / Math.max(columns, 1));
+        if (fit < 132) console.warn(`bagLayout ${columns} columns → width ${fit} < 132`);
+        const w = Math.min(188, Math.max(132, fit));
         /** 整盘 512×302，前唇从 y=246 起，约 56px。食物按凹槽收，不按整盘宽放大。 */
         const trayH = Math.round(w * (302 / 512));
         const step = Math.max(12, Math.round(trayH * (56 / 302)));
@@ -2012,7 +2142,6 @@ export class GameController extends Component {
             if (selected) {
                 this.drawBufferSelect(slotNode);
                 this.drawCoralFramePulse(slotNode, BUF_SLOT_W + 4, BUF_SLOT_H + 4, 2, 32);
-                this.drawPlaceHereTag(slotNode, BUF_SLOT_H / 2 + 22);
             }
 
             const item = board.buffer[i];
@@ -2151,9 +2280,10 @@ export class GameController extends Component {
                 return;
             }
             const nextCount = board.trays[destIndex].items.length;
-            const m = this.trayMetrics(board.trays[destIndex].cap);
-            const fy = this.foodSlotY(m.slotH, board.trays[destIndex].cap, nextCount);
-            const toWorld = trayNode.getComponent(UITransform)!.convertToWorldSpaceAR(new Vec3(0, fy, 0));
+            const m = this.trayAt(destIndex);
+            const cap = board.trays[destIndex].cap;
+            const seat = this.seatBox(m.slotW, m.slotH, cap, nextCount, m.horizontal);
+            const toWorld = trayNode.getComponent(UITransform)!.convertToWorldSpaceAR(new Vec3(seat.x, seat.y, 0));
             to = ui.convertToNodeSpaceAR(toWorld);
             const size = this.trayFoodSize(m.slotH, board.trays[destIndex].cap);
             land = new Vec3(size.w / flyW, size.h / flyH, 1);
@@ -2198,9 +2328,10 @@ export class GameController extends Component {
         const ui = root.getComponent(UITransform)!;
         const from = ui.convertToNodeSpaceAR(food.worldPosition);
         const nextCount = board.trays[destIndex].items.length;
-        const m = this.trayMetrics(board.trays[destIndex].cap);
-        const fy = this.foodSlotY(m.slotH, board.trays[destIndex].cap, nextCount);
-        const toWorld = trayNode.getComponent(UITransform)!.convertToWorldSpaceAR(new Vec3(0, fy, 0));
+        const m = this.trayAt(destIndex);
+        const cap = board.trays[destIndex].cap;
+        const seat = this.seatBox(m.slotW, m.slotH, cap, nextCount, m.horizontal);
+        const toWorld = trayNode.getComponent(UITransform)!.convertToWorldSpaceAR(new Vec3(seat.x, seat.y, 0));
         const to = ui.convertToNodeSpaceAR(toWorld);
         const flyer = this.addSprite(root, 'Flyer', this.frameForFood(item), 64, 96, from.x, from.y, Color.WHITE);
         const size = this.trayFoodSize(m.slotH, board.trays[destIndex].cap);
@@ -2237,22 +2368,9 @@ export class GameController extends Component {
         this.animateDoorIndex = result.sealed && result.dest.kind === 'tray' ? result.dest.index : null;
         this.holdWin = win;
         this.render();
-        if (result.sealed) {
-            const tray = root.getChildByName(`Tray${result.dest.kind === 'tray' ? result.dest.index : 0}`);
-            const door = tray ? tray.getChildByName('Door') : null;
-            if (door) {
-                tween(door)
-                    .to(DOOR_SEC, { scale: new Vec3(1, 1, 1) }, { easing: easing.cubicOut })
-                    .call(() => {
-                        this.animateDoorIndex = null;
-                        if (tray) this.bounceNode(tray);
-                        this.finishMove(win);
-                    })
-                    .start();
-                return;
-            }
-        }
+        if (result.sealed && result.dest.kind === 'tray' && this.playDoorClose(result.dest.index, win)) return;
         this.animateDoorIndex = null;
+        this.render();
         this.finishMove(win);
     }
 
@@ -2287,24 +2405,36 @@ export class GameController extends Component {
         this.animateDoorIndex = result.sealed && result.dest.kind === 'tray' ? result.dest.index : null;
         this.holdWin = win;
         this.render();
-        if (result.sealed) {
-            const tray = root.getChildByName(`Tray${result.dest.kind === 'tray' ? result.dest.index : 0}`);
-            const door = tray ? tray.getChildByName('Door') : null;
-            if (door) {
-                tween(door)
-                    .to(DOOR_SEC, { scale: new Vec3(1, 1, 1) }, { easing: easing.cubicOut })
-                    .call(() => {
-                        this.animateDoorIndex = null;
-                        const sealedTray = tray;
-                        if (sealedTray) this.bounceNode(sealedTray);
-                        this.finishMove(win);
-                    })
-                    .start();
-                return;
+        if (result.sealed && result.dest.kind === 'tray' && this.playDoorClose(result.dest.index, win)) return;
+        this.animateDoorIndex = null;
+        this.render();
+        this.finishMove(win);
+    }
+
+    /** render() 延迟销毁旧节点，getChildByName 会命中即将销毁的旧槽，门动画挂上去就丢了。 */
+    private playDoorClose(index: number, win: boolean): boolean {
+        const root = this.playRoot;
+        if (!root) return false;
+        const name = `Tray${index}`;
+        let tray: Node | null = null;
+        const kids = root.children;
+        for (let i = kids.length - 1; i >= 0; i--) {
+            if (kids[i].name === name) {
+                tray = kids[i];
+                break;
             }
         }
-        this.animateDoorIndex = null;
-        this.finishMove(win);
+        const door = tray ? tray.getChildByName('Door') : null;
+        if (!door || !tray) return false;
+        tween(door)
+            .to(DOOR_SEC, { scale: new Vec3(1, 1, 1) }, { easing: easing.cubicOut })
+            .call(() => {
+                this.animateDoorIndex = null;
+                this.bounceNode(tray);
+                this.finishMove(win);
+            })
+            .start();
+        return true;
     }
 
     private finishMove(win: boolean) {
@@ -2528,7 +2658,7 @@ export class GameController extends Component {
         const board = this.board;
         const pack = new Node('PrideGlow');
         pack.layer = UI_2D;
-        pack.setPosition(0, this.trayY(), 0);
+        pack.setPosition(0, this.trayAt(0).y, 0);
         pack.addComponent(UITransform).setContentSize(8, 8);
         const first = root.getChildByName('Tray0');
         root.insertChild(pack, first ? first.getSiblingIndex() : 0);
@@ -3097,7 +3227,7 @@ export class GameController extends Component {
             const i = this.holdHintTrays[n];
             const tray = root.getChildByName(`Tray${i}`);
             if (!tray) continue;
-            this.drawSwitchGuide(tray, this.trayMetrics(board.trays[i].cap));
+            this.drawSwitchGuide(tray, this.trayAt(i));
         }
     }
 
@@ -3139,7 +3269,7 @@ export class GameController extends Component {
             const i = indexes[n];
             const tray = root.getChildByName(`Tray${i}`);
             if (!tray) continue;
-            const m = this.trayMetrics(board.trays[i].cap);
+            const m = this.trayAt(i);
             const flash = new Node('HintFlash');
             flash.layer = UI_2D;
             flash.addComponent(UITransform).setContentSize(m.outerW, m.outerH);

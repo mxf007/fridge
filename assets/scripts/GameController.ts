@@ -70,6 +70,9 @@ const DOOR = new Color(198, 202, 198, 255);
 const HANDLE = new Color(168, 172, 168, 255);
 const CORAL = new Color(224, 122, 95, 255);
 const SAGE = new Color(122, 158, 126, 255);
+/** 选中格呼吸描边：淡靛蓝主色 + 更浅外晕 */
+const SELECT_PULSE_BLUE = new Color(118, 142, 232, 255);
+const SELECT_PULSE_BLUE_SOFT = new Color(168, 186, 248, 255);
 
 const Y_TRAY = 250;
 const Y_BUFFER = -524;
@@ -1155,6 +1158,11 @@ export class GameController extends Component {
                 this.drawSageDashedRing(node, m.outerW, m.outerH, 28, 'HintRing');
             }
 
+            if (selected && !closed) {
+                this.drawCoralFramePulse(node, m.outerW, m.outerH, 4, 24);
+                this.drawPlaceHereTag(node, m.outerH / 2 + 28);
+            }
+
             node.on(Node.EventType.TOUCH_END, () => {
                 if (!this.board || this.busy || this.board.isWin()) return;
                 if (this.holdHintTrays.indexOf(i) >= 0) this.holdHintTrays = [];
@@ -1482,6 +1490,68 @@ export class GameController extends Component {
         for (let c = 0; c < board.bags.length; c++) {
             if (board.peekBag(c) === kind) this.shakeBagTop(c);
         }
+    }
+
+    /** 选中框呼吸：细蓝描边 schedule 重绘 alpha。 */
+    private drawCoralFramePulse(parent: Node, w: number, h: number, inset: number, radius: number) {
+        const pulse = new Node('CoralPulse');
+        pulse.layer = UI_2D;
+        pulse.addComponent(UITransform).setContentSize(w + 24, h + 24);
+        const g = pulse.addComponent(Graphics);
+        const x = -w / 2 + inset;
+        const y = -h / 2 + inset;
+        const rw = w - inset * 2;
+        const rh = h - inset * 2;
+        const paint = (haloA: number, ringA: number) => {
+            if (!g.isValid) return;
+            g.clear();
+            const ha = Math.min(255, Math.max(0, Math.round(haloA)));
+            const ra = Math.min(255, Math.max(0, Math.round(ringA)));
+            g.lineWidth = 7;
+            g.strokeColor = new Color(
+                SELECT_PULSE_BLUE_SOFT.r,
+                SELECT_PULSE_BLUE_SOFT.g,
+                SELECT_PULSE_BLUE_SOFT.b,
+                ha,
+            );
+            g.roundRect(x - 6, y - 6, rw + 12, rh + 12, radius + 5);
+            g.stroke();
+            g.lineWidth = 3;
+            g.strokeColor = new Color(SELECT_PULSE_BLUE.r, SELECT_PULSE_BLUE.g, SELECT_PULSE_BLUE.b, ra);
+            g.roundRect(x - 1, y - 1, rw + 2, rh + 2, radius + 1);
+            g.stroke();
+        };
+        paint(70, 140);
+        parent.addChild(pulse);
+        let phase = 0;
+        const tick = () => {
+            if (!pulse.isValid || !g.isValid) {
+                this.unschedule(tick);
+                return;
+            }
+            phase += 0.07;
+            const k = (Math.sin(phase) + 1) * 0.5;
+            paint(45 + k * 150, 75 + k * 130);
+        };
+        this.schedule(tick, 0.033);
+    }
+
+    /** 槽上方矩形 +「放这里」。 */
+    private drawPlaceHereTag(parent: Node, y: number) {
+        const tag = new Node('PlaceHere');
+        tag.layer = UI_2D;
+        tag.setPosition(0, y, 0);
+        tag.addComponent(UITransform).setContentSize(116, 34);
+        const g = tag.addComponent(Graphics);
+        g.fillColor = MILK;
+        g.roundRect(-58, -17, 116, 34, 6);
+        g.fill();
+        g.strokeColor = CORAL;
+        g.lineWidth = 2;
+        g.roundRect(-58, -17, 116, 34, 6);
+        g.stroke();
+        this.addLabel(tag, 'Txt', '放这里', 22, WALNUT, 108, 30);
+        parent.addChild(tag);
     }
 
     private drawSwitchGuide(tray: Node, m: { outerW: number; outerH: number }, tipText = '点这格') {
@@ -1939,7 +2009,11 @@ export class GameController extends Component {
                 && board.dest.kind === 'buffer'
                 && board.dest.index === i
             );
-            if (selected) this.drawBufferSelect(slotNode);
+            if (selected) {
+                this.drawBufferSelect(slotNode);
+                this.drawCoralFramePulse(slotNode, BUF_SLOT_W + 4, BUF_SLOT_H + 4, 2, 32);
+                this.drawPlaceHereTag(slotNode, BUF_SLOT_H / 2 + 22);
+            }
 
             const item = board.buffer[i];
             if (item) {

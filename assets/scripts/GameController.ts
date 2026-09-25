@@ -145,6 +145,7 @@ const UUID = {
     traySealed: '8085b3c5-21f0-4bcc-b990-c97f4c899dca@f9941',
     iconUndo: '73fbe16c-3f5c-4230-854b-1948ab7cf28f@f9941',
     iconHint: '9be83f96-829c-4c60-9e25-590aa93e4e46@f9941',
+    handPoint: 'e1c12f55-9340-4b85-ae10-2091d7f20051@f9941',
     winPerfect: 'd1312f55-9340-4b85-ae10-2091d7f20031@f9941',
     shareWin: 'd1402f55-9340-4b85-ae10-2091d7f20040@f9941',
     shareMilestone: 'd1412f55-9340-4b85-ae10-2091d7f20041@f9941',
@@ -211,6 +212,7 @@ export class GameController extends Component {
 
     @property({ type: SpriteFrame })
     iconHint: SpriteFrame | null = null;
+    private handPoint: SpriteFrame | null = null;
 
     @property({ type: SpriteFrame })
     winPerfect: SpriteFrame | null = null;
@@ -253,6 +255,8 @@ export class GameController extends Component {
     private holdShakeKind: FoodId | null = null;
     private revealBagCol: number | null = null;
     private lockedBagCol: number | null = null;
+    /** 第 1 关尚未通关时，第一下落子前指向栈顶。 */
+    private l1Guide = false;
     /** 开局锁定的购物袋前后排；null = 一排。整关不随翻层重排。 */
     private bagRowPlan: { front: number[]; back: number[] } | null = null;
     /** 通关刚跨过 10/20/30，回主页弹一次里程碑卡。 */
@@ -637,6 +641,7 @@ export class GameController extends Component {
         }
         if (!this.iconUndo) this.iconUndo = await loadFrame(UUID.iconUndo);
         if (!this.iconHint) this.iconHint = await loadFrame(UUID.iconHint);
+        if (!this.handPoint) this.handPoint = await loadFrame(UUID.handPoint);
         if (!this.winPerfect) this.winPerfect = await loadFrame(UUID.winPerfect);
         if (!this.shareWin) this.shareWin = await loadFrame(UUID.shareWin);
         if (!this.shareMilestone) this.shareMilestone = await loadFrame(UUID.shareMilestone);
@@ -679,6 +684,7 @@ export class GameController extends Component {
         this.holdShakeKind = null;
         this.revealBagCol = null;
         this.lockedBagCol = null;
+        this.l1Guide = level.id === 1 && this.clearedId() < 1;
         this.bagRowPlan = this.buildBagRowPlan(level);
         this.ensurePlayRoot();
         this.playRoot.active = true;
@@ -1271,6 +1277,7 @@ export class GameController extends Component {
                 this.render();
             }, this);
         }
+        this.raiseSwitchHands(root);
     }
 
     private paintDoor(g: Graphics, slotW: number, slotH: number) {
@@ -1703,6 +1710,19 @@ export class GameController extends Component {
             .union()
             .repeatForever()
             .start();
+
+        const root = tray.parent;
+        const base = tray.position;
+        const rest = new Vec3(base.x + m.outerW / 2 - 8, base.y - m.outerH / 2 + 96, 0);
+        const tap = new Vec3(base.x + m.outerW / 2 - 28, base.y - m.outerH / 2 + 76, 0);
+        const hand = this.addSprite(root || tray, 'SwitchHand', this.handPoint || this.builtin, 108, 120, rest.x, rest.y, Color.WHITE);
+        if (root) hand.setSiblingIndex(root.children.length - 1);
+        tween(hand)
+            .to(0.45, { position: tap }, { easing: easing.sineInOut })
+            .to(0.45, { position: rest }, { easing: easing.sineInOut })
+            .union()
+            .repeatForever()
+            .start();
     }
 
     private drawSageDashedRing(parent: Node, w: number, h: number, radius: number, name: string) {
@@ -1979,8 +1999,24 @@ export class GameController extends Component {
             if (this.holdHint && this.holdHint.bagCol === c) {
                 this.drawSageDashedRing(foodNode, foodSize.w + 12, foodSize.h + 12, 18, 'HintRing');
             }
+            if (this.l1Guide && board.level.id === 1) {
+                this.drawL1Guide(colNode, layout.w, y);
+            }
         }
         return colNode;
+    }
+
+    /** 第 1 关：手指指向栈顶。不挡点击。 */
+    private drawL1Guide(colNode: Node, layoutW: number, topLocalY: number) {
+        const rest = new Vec3(layoutW / 2 + 36, topLocalY + 64, 0);
+        const tap = new Vec3(layoutW / 2 + 16, topLocalY + 44, 0);
+        const hand = this.addSprite(colNode, 'L1Hand', this.handPoint || this.builtin, 118, 132, rest.x, rest.y, Color.WHITE);
+        tween(hand)
+            .to(0.45, { position: tap }, { easing: easing.sineInOut })
+            .to(0.45, { position: rest }, { easing: easing.sineInOut })
+            .union()
+            .repeatForever()
+            .start();
     }
 
     /** 冰箱与叠盘之间的空档：左右摆低对比厨房小物件，不挡点击、不挡飞行。 */
@@ -2285,13 +2321,20 @@ export class GameController extends Component {
             const seat = this.seatBox(m.slotW, m.slotH, cap, nextCount, m.horizontal);
             const toWorld = trayNode.getComponent(UITransform)!.convertToWorldSpaceAR(new Vec3(seat.x, seat.y, 0));
             to = ui.convertToNodeSpaceAR(toWorld);
-            const size = this.trayFoodSize(m.slotH, board.trays[destIndex].cap);
-            land = new Vec3(size.w / flyW, size.h / flyH, 1);
+            const end = Math.min(seat.w, seat.h) * 0.82;
+            const fromUi = fromNode.getComponent(UITransform);
+            const fromScale = fromNode.worldScale;
+            flyW = fromUi ? fromUi.contentSize.width * fromScale.x : flyW;
+            flyH = fromUi ? fromUi.contentSize.height * fromScale.y : flyH;
+            land = new Vec3(end / flyW, end / flyH, 1);
         }
 
         const flyer = this.addSprite(root, 'Flyer', flyFrame, flyW, flyH, from.x, from.y, Color.WHITE);
         tween(flyer)
-            .to(FLY_SEC, { position: new Vec3(to.x, to.y, 0), scale: land }, { easing: easing.cubicOut })
+            .to(FLY_SEC, { position: new Vec3(to.x, to.y, 0) }, { easing: easing.cubicOut })
+            .start();
+        tween(flyer)
+            .to(FLY_SEC, { scale: land }, { easing: easing.linear })
             .start();
 
         this.scheduleOnce(() => {
@@ -2392,6 +2435,7 @@ export class GameController extends Component {
         }
         this.holdHint = null;
         this.holdHintBuffers = [];
+        this.l1Guide = false;
         this.revealBagCol = board.bags[col].length > 0 ? col : null;
         if (this.revealBagCol != null) {
             const locked = this.revealBagCol;
@@ -3228,6 +3272,28 @@ export class GameController extends Component {
             const tray = root.getChildByName(`Tray${i}`);
             if (!tray) continue;
             this.drawSwitchGuide(tray, this.trayAt(i));
+        }
+        this.raiseSwitchHands(root);
+    }
+
+    /** 手指挂在格子上会被后画的呼吸框盖住，画完后提到根节点最上层。 */
+    private raiseSwitchHands(root: Node) {
+        const hands: Node[] = [];
+        for (let i = 0; i < root.children.length; i++) {
+            const child = root.children[i];
+            if (child.name === 'SwitchHand') hands.push(child);
+            const nested = child.getChildByName('SwitchHand');
+            if (nested) hands.push(nested);
+        }
+        const ui = root.getComponent(UITransform);
+        for (let i = 0; i < hands.length; i++) {
+            const hand = hands[i];
+            if (ui && hand.parent !== root) {
+                const local = ui.convertToNodeSpaceAR(hand.worldPosition);
+                hand.setParent(root);
+                hand.setPosition(local);
+            }
+            hand.setSiblingIndex(root.children.length - 1);
         }
     }
 

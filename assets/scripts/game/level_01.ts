@@ -5,7 +5,7 @@ import type { LevelDef } from './types';
 export const LEVEL_01: LevelDef = {
     id: 1,
     title: '先把牛奶收进去',
-    teach: '点最上面的，飞进已选中的格',
+    teach: '手指指向栈顶',
     trays: [{ cap: 4 }],
     bags: [['milk', 'milk', 'milk', 'milk']],
     buffer: 3,

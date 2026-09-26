@@ -47,9 +47,9 @@
         "trimX": 0,
         "trimY": 0,
         "width": 256,
-        "height": 212,
+        "height": 210,
         "rawWidth": 256,
-        "rawHeight": 212,
+        "rawHeight": 210,
         "borderTop": 0,
         "borderBottom": 0,
         "borderLeft": 0,
@@ -62,16 +62,16 @@
         "vertices": {
           "rawPosition": [
             -128,
-            -106,
+            -105,
             0,
             128,
-            -106,
+            -105,
             0,
             -128,
-            106,
+            105,
             0,
             128,
-            106,
+            105,
             0
           ],
           "indexes": [
@@ -84,9 +84,9 @@
           ],
           "uv": [
             0,
-            212,
+            210,
             256,
-            212,
+            210,
             0,
             0,
             256,
@@ -104,12 +104,12 @@
           ],
           "minPos": [
             -128,
-            -106,
+            -105,
             0
           ],
           "maxPos": [
             128,
-            106,
+            105,
             0
           ]
         },
@@ -128,7 +128,7 @@
   "userData": {
     "type": "sprite-frame",
     "hasAlpha": true,
-    "fixAlphaTransparencyArtifacts": false,
+    "fixAlphaTransparencyArtifacts": true,
     "redirect": "d1202f55-9340-4b85-ae10-2091d7f20021@6c48a"
   }
 }

@@ -261,12 +261,20 @@ export class GameController extends Component {
     private bagRowPlan: { front: number[]; back: number[] } | null = null;
     /** 通关刚跨过 10/20/30，回主页弹一次里程碑卡。 */
     private pendingMilestone: number | null = null;
+    /** 第 1 关画面用到的图。齐了才进关。 */
+    private level1Ready: Promise<void> | null = null;
+    /** 第 1 关显示之后再补的其余关卡图。 */
+    private restReady: Promise<void> | null = null;
+    private enteringLevel = false;
 
     onLoad() {
         // 自检含可见信息审计，同步跑会把预览进度条卡住。用 tools/run_level_selfchecks_19_30.ts。
         this.bindHome();
         this.refreshAlbumLink();
-        void this.ensureFrames();
+        void this.loadSlot(this.btnStart, UUID.btnStart, (frame) => { this.btnStart = frame; }).then(() => {
+            if (this.node && this.node.isValid) this.polishHomeChrome();
+        });
+        void this.ensureLevel1Frames();
     }
 
     private bindHome() {
@@ -606,65 +614,85 @@ export class GameController extends Component {
         }
     }
 
-    private async ensureFrames() {
-        if (!this.btnStart) this.btnStart = await loadFrame(UUID.btnStart);
-        this.polishHomeChrome();
-        if (!this.foodMilk) this.foodMilk = await loadFrame(UUID.foodMilk);
-        if (!this.foodVeg) this.foodVeg = await loadFrame(UUID.foodVeg);
-        if (!this.foodFruit) this.foodFruit = await loadFrame(UUID.foodFruit);
-        if (!this.foodMeat) this.foodMeat = await loadFrame(UUID.foodMeat);
-        if (!this.foodSauce) this.foodSauce = await loadFrame(UUID.foodSauce);
-        if (!this.foodLeftover) this.foodLeftover = await loadFrame(UUID.foodLeftover);
-        if (!this.foodGrape) this.foodGrape = await loadFrame(UUID.foodGrape);
-        if (!this.foodLemon) this.foodLemon = await loadFrame(UUID.foodLemon);
-        if (!this.foodKiwi) this.foodKiwi = await loadFrame(UUID.foodKiwi);
-        if (!this.foodPineapple) this.foodPineapple = await loadFrame(UUID.foodPineapple);
-        if (!this.foodWatermelon) this.foodWatermelon = await loadFrame(UUID.foodWatermelon);
-        if (!this.foodCoconut) this.foodCoconut = await loadFrame(UUID.foodCoconut);
-        const bagIds: [FoodId, string][] = [
-            ['milk', UUID.bagMilk],
-            ['veg', UUID.bagVeg],
-            ['fruit', UUID.bagFruit],
-            ['meat', UUID.bagMeat],
-            ['sauce', UUID.bagSauce],
-            ['leftover', UUID.bagLeftover],
-            ['grape', UUID.bagGrape],
-            ['lemon', UUID.bagLemon],
-            ['kiwi', UUID.bagKiwi],
-            ['pineapple', UUID.bagPineapple],
-            ['watermelon', UUID.bagWatermelon],
-            ['coconut', UUID.bagCoconut],
-        ];
-        for (let i = 0; i < bagIds.length; i++) {
-            const id = bagIds[i][0];
-            if (!this.bagFrames[id]) this.bagFrames[id] = await loadFrame(bagIds[i][1]);
-        }
-        if (!this.iconUndo) this.iconUndo = await loadFrame(UUID.iconUndo);
-        if (!this.iconHint) this.iconHint = await loadFrame(UUID.iconHint);
-        if (!this.handPoint) this.handPoint = await loadFrame(UUID.handPoint);
-        if (!this.winPerfect) this.winPerfect = await loadFrame(UUID.winPerfect);
-        if (!this.shareWin) this.shareWin = await loadFrame(UUID.shareWin);
-        if (!this.shareMilestone) this.shareMilestone = await loadFrame(UUID.shareMilestone);
-        if (!this.bgPlay) this.bgPlay = await loadFrame(UUID.bgPlay);
-        if (!this.bgPlayWall) this.bgPlayWall = await loadFrame(UUID.bgPlayWall);
-        if (!this.worktopTop) this.worktopTop = await loadFrame(UUID.worktopTop);
-        if (!this.worktopFront) this.worktopFront = await loadFrame(UUID.worktopFront);
-        if (!this.propBoard) this.propBoard = await loadFrame(UUID.propBoard);
-        if (!this.propCup) this.propCup = await loadFrame(UUID.propCup);
-        if (!this.propCloth) this.propCloth = await loadFrame(UUID.propCloth);
-        if (!this.bagHidden) this.bagHidden = await loadFrame(UUID.bagHidden);
-        if (!this.bagTrayLip) this.bagTrayLip = await loadFrame(UUID.bagTrayLip);
-        if (!this.bagTrayLower) this.bagTrayLower = await loadFrame(UUID.bagTrayLower);
-        if (!this.bagTrayTop) this.bagTrayTop = await loadFrame(UUID.bagTrayTop);
-        if (!this.bufferBoard) this.bufferBoard = await loadFrame(UUID.bufferBoard);
-        if (!this.trayEmpty) this.trayEmpty = await loadFrame(UUID.trayEmpty);
-        if (!this.traySealed) this.traySealed = await loadFrame(UUID.traySealed);
-        this.polishHomeChrome();
-        this.builtin = await loadFrame(UUID.builtin);
-        if (this.board) this.render();
+    /** 已在内存里的图不再请求。多张一起加载，不排队。 */
+    private loadSlot(current: SpriteFrame | null, uuid: string, save: (frame: SpriteFrame) => void): Promise<void> {
+        if (current) return Promise.resolve();
+        return loadFrame(uuid).then((frame) => {
+            if (frame) save(frame);
+        });
+    }
+
+    private ensureLevel1Frames(): Promise<void> {
+        if (!this.level1Ready) this.level1Ready = this.loadLevel1Frames();
+        return this.level1Ready;
+    }
+
+    /** 第 1 关：背景、冰箱框、台面、托盘、牛奶、手指、重开。 */
+    private loadLevel1Frames(): Promise<void> {
+        return Promise.all([
+            this.loadSlot(this.builtin, UUID.builtin, (frame) => { this.builtin = frame; }),
+            this.loadSlot(this.bgPlay, UUID.bgPlay, (frame) => { this.bgPlay = frame; }),
+            this.loadSlot(this.worktopTop, UUID.worktopTop, (frame) => { this.worktopTop = frame; }),
+            this.loadSlot(this.worktopFront, UUID.worktopFront, (frame) => { this.worktopFront = frame; }),
+            this.loadSlot(this.propBoard, UUID.propBoard, (frame) => { this.propBoard = frame; }),
+            this.loadSlot(this.propCup, UUID.propCup, (frame) => { this.propCup = frame; }),
+            this.loadSlot(this.propCloth, UUID.propCloth, (frame) => { this.propCloth = frame; }),
+            this.loadSlot(this.bagTrayLower, UUID.bagTrayLower, (frame) => { this.bagTrayLower = frame; }),
+            this.loadSlot(this.bagTrayTop, UUID.bagTrayTop, (frame) => { this.bagTrayTop = frame; }),
+            this.loadSlot(this.foodMilk, UUID.foodMilk, (frame) => { this.foodMilk = frame; }),
+            this.loadSlot(this.handPoint, UUID.handPoint, (frame) => { this.handPoint = frame; }),
+            this.loadSlot(this.iconUndo, UUID.iconUndo, (frame) => { this.iconUndo = frame; }),
+        ]).then(() => undefined);
+    }
+
+    private ensureRestFrames(): Promise<void> {
+        if (!this.restReady) this.restReady = this.loadRestFrames();
+        return this.restReady;
+    }
+
+    /** 第 2 关起才用到的食物、提示、通关和柜台。bag_xxx 合成图画面不用，不加载。 */
+    private loadRestFrames(): Promise<void> {
+        return Promise.all([
+            this.loadSlot(this.foodVeg, UUID.foodVeg, (frame) => { this.foodVeg = frame; }),
+            this.loadSlot(this.foodFruit, UUID.foodFruit, (frame) => { this.foodFruit = frame; }),
+            this.loadSlot(this.foodMeat, UUID.foodMeat, (frame) => { this.foodMeat = frame; }),
+            this.loadSlot(this.foodSauce, UUID.foodSauce, (frame) => { this.foodSauce = frame; }),
+            this.loadSlot(this.foodLeftover, UUID.foodLeftover, (frame) => { this.foodLeftover = frame; }),
+            this.loadSlot(this.foodGrape, UUID.foodGrape, (frame) => { this.foodGrape = frame; }),
+            this.loadSlot(this.foodLemon, UUID.foodLemon, (frame) => { this.foodLemon = frame; }),
+            this.loadSlot(this.foodKiwi, UUID.foodKiwi, (frame) => { this.foodKiwi = frame; }),
+            this.loadSlot(this.foodPineapple, UUID.foodPineapple, (frame) => { this.foodPineapple = frame; }),
+            this.loadSlot(this.foodWatermelon, UUID.foodWatermelon, (frame) => { this.foodWatermelon = frame; }),
+            this.loadSlot(this.foodCoconut, UUID.foodCoconut, (frame) => { this.foodCoconut = frame; }),
+            this.loadSlot(this.iconHint, UUID.iconHint, (frame) => { this.iconHint = frame; }),
+            this.loadSlot(this.winPerfect, UUID.winPerfect, (frame) => { this.winPerfect = frame; }),
+            this.loadSlot(this.shareWin, UUID.shareWin, (frame) => { this.shareWin = frame; }),
+            this.loadSlot(this.shareMilestone, UUID.shareMilestone, (frame) => { this.shareMilestone = frame; }),
+            this.loadSlot(this.bgPlayWall, UUID.bgPlayWall, (frame) => { this.bgPlayWall = frame; }),
+            this.loadSlot(this.bufferBoard, UUID.bufferBoard, (frame) => { this.bufferBoard = frame; }),
+        ]).then(() => undefined);
     }
 
     private startLevel(level: LevelDef) {
+        void this.openLevel(level);
+    }
+
+    /** 第 1 关只等自己的图。其它关等补齐后再画，避免先空白再闪现。 */
+    private async openLevel(level: LevelDef) {
+        if (this.enteringLevel) return;
+        this.enteringLevel = true;
+        try {
+            if (level.id === 1) await this.ensureLevel1Frames();
+            else await Promise.all([this.ensureLevel1Frames(), this.ensureRestFrames()]);
+            if (!this.node || !this.node.isValid) return;
+            this.presentLevel(level);
+            if (level.id === 1) void this.ensureRestFrames();
+        } finally {
+            this.enteringLevel = false;
+        }
+    }
+
+    private presentLevel(level: LevelDef) {
         this.unscheduleAllCallbacks();
         for (let i = 0; i < HOME_NODES.length; i++) {
             const n = this.node.getChildByName(HOME_NODES[i]);
@@ -748,6 +776,7 @@ export class GameController extends Component {
         const wall = this.bgPlay || this.bgPlayWall;
         this.addSprite(root, 'PlayBgWall', wall || this.builtin, size.w, size.h, 0, 0, wall ? Color.WHITE : CREAM);
         this.drawTrays(root, board);
+        this.drawPropBoard(root);
         this.drawWorktopBack(root);
         this.drawMidProps(root);
         this.drawBags(root, board);
@@ -1816,7 +1845,11 @@ export class GameController extends Component {
 
     /** 叠盘凹槽内食材尺寸：高盒略瘦高，圆果近方，避免正方形撑出前唇。 */
     private bagFoodSize(kind: FoodId, food: number): { w: number; h: number } {
-        if (kind === 'milk' || kind === 'sauce' || kind === 'pineapple') {
+        if (kind === 'milk') {
+            const h = Math.round(food * 1.5);
+            return { w: Math.round(h * 0.575), h };
+        }
+        if (kind === 'sauce' || kind === 'pineapple') {
             return { w: Math.round(food * 0.72), h: food };
         }
         if (kind === 'veg' || kind === 'meat' || kind === 'leftover' || kind === 'watermelon') {
@@ -2019,15 +2052,19 @@ export class GameController extends Component {
             .start();
     }
 
+    /** 砧板先画，台面后画，重叠处被 worktop_top 盖住。 */
+    private drawPropBoard(root: Node) {
+        if (!this.propBoard) return;
+        const dim = new Color(255, 255, 255, 220);
+        this.addSprite(root, 'PropBoard', this.propBoard, 150, 84, -216, -88, dim);
+    }
+
     /** 冰箱与叠盘之间的空档：左右摆低对比厨房小物件，不挡点击、不挡飞行。 */
     private drawMidProps(root: Node) {
         const dim = new Color(255, 255, 255, 220);
         const y = -80;
-        if (this.propBoard) {
-            this.addSprite(root, 'PropBoard', this.propBoard, 150, 84, -248, y - 8, dim);
-        }
         if (this.propCloth) {
-            this.addSprite(root, 'PropCloth', this.propCloth, 118, 92, 248, y - 4, dim);
+            this.addSprite(root, 'PropCloth', this.propCloth, 120, 78, 248, y - 4, dim);
         }
         if (this.propCup) {
             this.addSprite(root, 'PropCup', this.propCup, 78, 66, 268, y + 36, dim);

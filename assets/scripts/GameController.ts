@@ -55,6 +55,8 @@ import { LEVEL_27 } from './game/level_27';
 import { LEVEL_28 } from './game/level_28';
 import { LEVEL_29 } from './game/level_29';
 import { LEVEL_30 } from './game/level_30';
+import { albumStatusLine, noteAlbumWin, prepareAlbum } from './game/AlbumState';
+import type { AlbumEntry } from './game/AlbumState';
 import type { Dest, FailReason, FoodId, HintPick, LevelDef, PlaceFail, PlaceReason } from './game/types';
 import { FOOD_NAMES } from './game/types';
 
@@ -149,6 +151,9 @@ const UUID = {
     winPerfect: 'd1312f55-9340-4b85-ae10-2091d7f20031@f9941',
     shareWin: 'd1402f55-9340-4b85-ae10-2091d7f20040@f9941',
     shareMilestone: 'd1412f55-9340-4b85-ae10-2091d7f20041@f9941',
+    albumDoor: 'e3022f55-9340-4b85-ae10-2091d7f20062@f9941',
+    albumDoorWide: 'e3032f55-9340-4b85-ae10-2091d7f20063@f9941',
+    albumBadge: 'e3072f55-9340-4b85-ae10-2091d7f20067@f9941',
     btnStart: 'c2a1b3d4-e5f6-4789-8012-3f4a5b6c7d8e@f9941',
     builtin: '20835ba4-6145-4fbc-a58a-051ce700aa3e@f9941',
 };
@@ -158,9 +163,10 @@ const PLAYABLE: LevelDef[] = [LEVEL_01, LEVEL_02, LEVEL_03, LEVEL_04, LEVEL_05, 
 const CLEARED_KEY = 'fridge_cleared';
 const MILESTONE_KEY = (n: number) => `fridge_milestone_${n}`;
 const MILESTONE_NS = [10, 20, 30];
-/** 图鉴长按分享引导关（UI §6.5）；其它已收关也可长按，但不标引导。 */
-const ALBUM_SHARE_FEATURED = [22, 25, 30];
-const ALBUM_LONG_PRESS_MS = 260;
+/** 图鉴按住分享。滑动列表里 260ms 会误触，规格改为 500ms。 */
+const ALBUM_LONG_PRESS_MS = 500;
+/** 位移超过这个值才当滑动，取消点按和长按。 */
+const ALBUM_SCROLL_SLOP = 14;
 
 const TOAST: Record<PlaceReason, string> = {
     wrong_kind: '这格只收牛奶',
@@ -223,6 +229,10 @@ export class GameController extends Component {
     @property({ type: SpriteFrame })
     shareMilestone: SpriteFrame | null = null;
 
+    private albumDoor: SpriteFrame | null = null;
+    private albumDoorWide: SpriteFrame | null = null;
+    private albumBadge: SpriteFrame | null = null;
+
     private board: BoardState | null = null;
     private playRoot: Node | null = null;
     private builtin: SpriteFrame | null = null;
@@ -265,16 +275,20 @@ export class GameController extends Component {
     private level1Ready: Promise<void> | null = null;
     /** 第 1 关显示之后再补的其余关卡图。 */
     private restReady: Promise<void> | null = null;
+    private albumReady: Promise<void> | null = null;
+    private albumToken = 0;
     private enteringLevel = false;
 
     onLoad() {
         // 自检含可见信息审计，同步跑会把预览进度条卡住。用 tools/run_level_selfchecks_19_30.ts。
         this.bindHome();
         this.refreshAlbumLink();
+        void this.ensureLevel1Frames();
+        void this.ensureRestFrames();
+        void this.ensureAlbumFrames();
         void this.loadSlot(this.btnStart, UUID.btnStart, (frame) => { this.btnStart = frame; }).then(() => {
             if (this.node && this.node.isValid) this.polishHomeChrome();
         });
-        void this.ensureLevel1Frames();
     }
 
     private bindHome() {
@@ -342,8 +356,15 @@ export class GameController extends Component {
         if (label) label.string = `我收过的冰箱  ${this.clearedId()}/30  >`;
     }
 
-    /** 轻量图鉴：已收关 3 列缩略；可纵向滑完 30 张；长按 260ms 分享，不阻塞关闭。 */
+    /** 图鉴：等食材和封门图到位再画。主页打开时这些图可能还没进内存。 */
     private openAlbum() {
+        const token = ++this.albumToken;
+        void this.presentAlbum(token);
+    }
+
+    private async presentAlbum(token: number) {
+        await Promise.all([this.ensureLevel1Frames(), this.ensureRestFrames(), this.ensureAlbumFrames()]);
+        if (token !== this.albumToken || !this.node || !this.node.isValid) return;
         const old = this.node.getChildByName('AlbumLayer');
         if (old) old.destroy();
         const size = this.canvasSize();
@@ -366,23 +387,25 @@ export class GameController extends Component {
         pg.roundRect(-320, -490, 640, 980, 36);
         pg.fill();
         layer.addChild(panel);
-        // 吃掉点击，避免点空白关页
         panel.on(Node.EventType.TOUCH_END, () => {}, this);
 
         this.addLabel(panel, 'Title', '我收过的冰箱', 36, WALNUT, 560, 48).setPosition(0, 430, 0);
         const cleared = this.clearedId();
+        const album = prepareAlbum(sys.localStorage, cleared, (id) => this.levelById(id));
         this.addLabel(panel, 'Progress', `${cleared} / 30`, 26, SAGE, 200, 36).setPosition(0, 380, 0);
-        this.addLabel(panel, 'ReplayHint', '点卡片再收一次 · 长按分享', 20, FRAME, 480, 28).setPosition(0, 348, 0);
+        this.addLabel(panel, 'ReplayHint', '点一下再收 · 按住可分享', 20, FRAME, 480, 28).setPosition(0, 348, 0);
 
         const cols = 3;
-        const cardW = 168;
-        const cardH = 150;
-        const gapX = 24;
-        const gapY = 20;
+        const cardW = 184;
+        const cardH = 176;
+        const gapX = 16;
+        const gapY = 16;
         const pitch = cardH + gapY;
         const maxShow = Math.min(cleared, 30);
-        const rows = Math.max(1, Math.ceil(maxShow / cols));
-        const contentH = maxShow > 0 ? rows * pitch - gapY : 0;
+        const ghost = cleared >= 1 && cleared < 30;
+        const total = maxShow + (ghost ? 1 : 0);
+        const rows = Math.max(1, Math.ceil(total / cols));
+        const contentH = total > 0 ? rows * pitch - gapY : 0;
 
         const viewW = 600;
         const viewH = 680;
@@ -402,41 +425,74 @@ export class GameController extends Component {
         content.setPosition(0, viewH / 2, 0);
         viewport.addChild(content);
 
+        let touchId = -1;
         let lastTouchY = 0;
+        let dragStartY = 0;
         let dragging = false;
+        let tracking = false;
+        let seenY = Number.NaN;
         const scrollBy = (dy: number) => {
             if (contentH <= viewH) return;
-            const yMax = viewH / 2;
-            const yMin = viewH / 2 - (contentH - viewH);
+            // 内容锚在顶边。手指上移，格子跟着上移，下面的关卡才进视口。
+            const yMin = viewH / 2;
+            const yMax = yMin + (contentH - viewH);
             const next = Math.min(yMax, Math.max(yMin, content.position.y + dy));
             content.setPosition(0, next, 0);
         };
-        const onTouchStart = (e: EventTouch) => {
+        const arm = (e: EventTouch) => {
+            const id = e.getID();
+            if (touchId === id && dragging) return;
+            touchId = id;
             dragging = true;
-            lastTouchY = e.getUILocation().y;
+            tracking = false;
+            dragStartY = e.getUILocation().y;
+            lastTouchY = dragStartY;
+            seenY = Number.NaN;
         };
-        const onTouchMove = (e: EventTouch) => {
-            if (!dragging) return;
+        const disarm = () => {
+            dragging = false;
+            tracking = false;
+            touchId = -1;
+        };
+        const followScroll = (e: EventTouch) => {
+            if (this.node.getChildByName('SharePreview')) return;
             const y = e.getUILocation().y;
+            if (!dragging || e.getID() !== touchId) arm(e);
+            if (y === seenY) return;
+            seenY = y;
+            if (!tracking) {
+                if (Math.abs(y - dragStartY) <= ALBUM_SCROLL_SLOP) return;
+                tracking = true;
+                scrollBy(y - dragStartY);
+                lastTouchY = y;
+                return;
+            }
             scrollBy(y - lastTouchY);
             lastTouchY = y;
         };
-        const onTouchEnd = () => {
-            dragging = false;
+        viewport.on(Node.EventType.TOUCH_START, arm, this, true);
+        viewport.on(Node.EventType.TOUCH_MOVE, followScroll, this, true);
+        viewport.on(Node.EventType.TOUCH_END, disarm, this, true);
+        viewport.on(Node.EventType.TOUCH_CANCEL, disarm, this, true);
+
+        const place = (index: number, card: Node) => {
+            const col = index % cols;
+            const row = Math.floor(index / cols);
+            const x = (col - 1) * (cardW + gapX);
+            const y = -(row * pitch + cardH / 2);
+            card.setPosition(x, y, 0);
         };
-        viewport.on(Node.EventType.TOUCH_START, onTouchStart, this);
-        viewport.on(Node.EventType.TOUCH_MOVE, onTouchMove, this);
-        viewport.on(Node.EventType.TOUCH_END, onTouchEnd, this);
-        viewport.on(Node.EventType.TOUCH_CANCEL, onTouchEnd, this);
 
         for (let i = 0; i < maxShow; i++) {
             const id = i + 1;
-            const col = i % cols;
-            const row = Math.floor(i / cols);
-            const x = (col - 1) * (cardW + gapX);
-            const y = -(row * pitch + cardH / 2);
-            const card = this.makeAlbumCard(content, id, cardW, cardH, scrollBy);
-            card.setPosition(x, y, 0);
+            const level = this.levelById(id);
+            const entry = album.entries[String(id)];
+            const card = this.makeAlbumCard(content, id, level, entry, cardW, cardH, followScroll);
+            place(i, card);
+        }
+        if (ghost) {
+            const card = this.makeAlbumGhost(content, cleared + 1, cardW, cardH, followScroll);
+            place(maxShow, card);
         }
 
         if (maxShow === 0) {
@@ -453,9 +509,11 @@ export class GameController extends Component {
     private makeAlbumCard(
         parent: Node,
         levelId: number,
+        level: LevelDef | null,
+        entry: AlbumEntry | undefined,
         w: number,
         h: number,
-        onScroll?: (dy: number) => void,
+        followScroll: (e: EventTouch) => void,
     ): Node {
         const card = new Node(`Album${levelId}`);
         card.layer = UI_2D;
@@ -470,35 +528,32 @@ export class GameController extends Component {
         g.stroke();
         parent.addChild(card);
 
-        this.paintAlbumFridgeThumb(card, levelId);
-
-        this.addLabel(card, 'Lv', `第 ${levelId} 关`, 22, WALNUT, 140, 28).setPosition(0, -42, 0);
-
-        const featured = ALBUM_SHARE_FEATURED.indexOf(levelId) >= 0;
-        if (featured) {
-            this.addLabel(card, 'Hint', '长按分享', 18, SAGE, 120, 24).setPosition(0, -62, 0);
-        }
+        if (level) this.paintAlbumThumb(card, level, entry ? entry.kinds : [], 0, 28, 160, 104);
+        this.addLabel(card, 'Lv', `第 ${levelId} 关`, 22, WALNUT, 168, 28).setPosition(0, -42, 0);
+        const status = this.addLabel(card, 'Status', albumStatusLine(entry), 16, FRAME, 172, 24);
+        status.setPosition(0, -66, 0);
+        const statusLabel = status.getComponent(Label);
+        if (statusLabel) statusLabel.overflow = Label.Overflow.SHRINK;
 
         let pressAt = 0;
         let shared = false;
         let startX = 0;
         let startY = 0;
-        let lastY = 0;
         let scrolling = false;
         const onShare = () => {
             if (shared || scrolling) return;
             shared = true;
-            this.showSharePreview(`第 ${levelId} 关我的冰箱`);
+            this.showAlbumShare(levelId, level, entry);
         };
         const replay = () => {
-            const level = this.nextPlayable(levelId - 1);
-            if (!level || level.id !== levelId) {
+            const next = this.levelById(levelId);
+            if (!next) {
                 this.showToast('这一关还没收拾');
                 return;
             }
             const layer = this.node.getChildByName('AlbumLayer');
             if (layer && layer.isValid) layer.destroy();
-            this.startLevel(level);
+            this.startLevel(next);
         };
         card.on(Node.EventType.TOUCH_START, (e: EventTouch) => {
             pressAt = Date.now();
@@ -507,20 +562,17 @@ export class GameController extends Component {
             const p = e.getUILocation();
             startX = p.x;
             startY = p.y;
-            lastY = p.y;
             this.scheduleOnce(() => {
                 if (pressAt > 0 && !scrolling && Date.now() - pressAt >= ALBUM_LONG_PRESS_MS) onShare();
             }, ALBUM_LONG_PRESS_MS / 1000);
         }, this);
         card.on(Node.EventType.TOUCH_MOVE, (e: EventTouch) => {
             const p = e.getUILocation();
-            const dy = p.y - lastY;
-            lastY = p.y;
-            if (Math.abs(p.x - startX) > 14 || Math.abs(p.y - startY) > 14) {
+            if (Math.abs(p.x - startX) > ALBUM_SCROLL_SLOP || Math.abs(p.y - startY) > ALBUM_SCROLL_SLOP) {
                 pressAt = 0;
                 scrolling = true;
             }
-            if (scrolling && onScroll) onScroll(dy);
+            followScroll(e);
         }, this);
         card.on(Node.EventType.TOUCH_END, () => {
             const held = pressAt > 0 ? Date.now() - pressAt : 0;
@@ -539,28 +591,175 @@ export class GameController extends Component {
         return card;
     }
 
-    /** 图鉴成品缩略：木框小冰箱 + 封门层，特色关加暖色点缀。 */
-    private paintAlbumFridgeThumb(card: Node, levelId: number) {
+    private makeAlbumGhost(
+        parent: Node,
+        levelId: number,
+        w: number,
+        h: number,
+        followScroll: (e: EventTouch) => void,
+    ): Node {
+        const card = new Node('AlbumNext');
+        card.layer = UI_2D;
+        card.addComponent(UITransform).setContentSize(w, h);
+        const g = card.addComponent(Graphics);
+        g.fillColor = new Color(255, 253, 248, 120);
+        g.roundRect(-w / 2, -h / 2, w, h, 20);
+        g.fill();
+        g.lineWidth = 3;
+        g.strokeColor = new Color(176, 130, 96, 120);
+        g.roundRect(-w / 2, -h / 2, w, h, 20);
+        g.stroke();
+        g.strokeColor = new Color(176, 130, 96, 160);
+        g.roundRect(-52, -8, 104, 72, 12);
+        g.stroke();
+        parent.addChild(card);
+        this.addLabel(card, 'Lv', `第 ${levelId} 关`, 22, new Color(107, 74, 58, 140), 168, 28).setPosition(0, -52, 0);
+
+        card.on(Node.EventType.TOUCH_MOVE, (e: EventTouch) => {
+            followScroll(e);
+        }, this);
+        return card;
+    }
+
+    /** 按这一关的竖格 / 横屉把封门贴进固定区域。容量大的格子更大。 */
+    private paintAlbumThumb(
+        parent: Node,
+        level: LevelDef,
+        kinds: (FoodId | null)[],
+        x: number,
+        y: number,
+        boxW: number,
+        boxH: number,
+    ) {
         const thumb = new Node('Thumb');
         thumb.layer = UI_2D;
-        thumb.setPosition(0, 18, 0);
-        thumb.addComponent(UITransform).setContentSize(96, 78);
-        const tg = thumb.addComponent(Graphics);
-        const featured = ALBUM_SHARE_FEATURED.indexOf(levelId) >= 0;
-        tg.fillColor = FRAME;
-        tg.roundRect(-40, -36, 80, 72, 12);
-        tg.fill();
-        tg.fillColor = featured ? new Color(255, 248, 236, 255) : FRIDGE_GLOW;
-        tg.roundRect(-32, -28, 64, 56, 8);
-        tg.fill();
-        const door = featured ? CORAL : new Color(210, 218, 222, 255);
-        for (let r = 0; r < 3; r++) {
-            const y = -18 + r * 16;
-            tg.fillColor = door;
-            tg.roundRect(-24, y, 48, 12, 4);
-            tg.fill();
+        thumb.setPosition(x, y, 0);
+        thumb.addComponent(UITransform).setContentSize(boxW, boxH);
+        parent.addChild(thumb);
+        const caps = level.trays.map((tray) => tray.cap);
+        const cells = this.albumThumbCells(caps, boxW - 8, boxH - 8);
+        for (let i = 0; i < cells.length; i++) {
+            const cell = cells[i];
+            const frame = new Node(`Cell${i}`);
+            frame.layer = UI_2D;
+            frame.setPosition(cell.x, cell.y, 0);
+            frame.addComponent(UITransform).setContentSize(cell.w, cell.h);
+            const g = frame.addComponent(Graphics);
+            g.fillColor = FRAME;
+            g.roundRect(-cell.w / 2, -cell.h / 2, cell.w, cell.h, 8);
+            g.fill();
+            thumb.addChild(frame);
+            const doorW = Math.max(8, cell.w - 8);
+            const doorH = Math.max(8, cell.h - 8);
+            const doorFrame = cell.horizontal ? this.albumDoorWide : this.albumDoor;
+            if (doorFrame) {
+                this.addSprite(frame, 'Door', doorFrame, doorW, doorH, 0, 0, Color.WHITE);
+            } else {
+                const door = new Node('Door');
+                door.layer = UI_2D;
+                door.addComponent(UITransform).setContentSize(doorW, doorH);
+                const dg = door.addComponent(Graphics);
+                dg.fillColor = DOOR;
+                dg.roundRect(-doorW / 2, -doorH / 2, doorW, doorH, 6);
+                dg.fill();
+                dg.fillColor = HANDLE;
+                const handleH = Math.max(8, doorH * 0.4);
+                dg.roundRect(doorW / 2 - 6, -handleH / 2, 4, handleH, 2);
+                dg.fill();
+                frame.addChild(door);
+            }
+            const kind = kinds[i] || null;
+            const food = kind ? this.frameForFood(kind) : null;
+            if (food) {
+                const foodH = Math.max(10, doorH * 0.62);
+                const foodW = foodH * 0.66;
+                this.addSprite(frame, 'Food', food, foodW, foodH, -doorW * 0.08, 0, Color.WHITE);
+            }
         }
-        card.addChild(thumb);
+    }
+
+    private albumThumbCells(caps: number[], boxW: number, boxH: number): {
+        x: number;
+        y: number;
+        w: number;
+        h: number;
+        horizontal: boolean;
+    }[] {
+        const horizontal = this.trayOrient(caps);
+        const vertical: number[] = [];
+        const drawers: number[] = [];
+        for (let i = 0; i < caps.length; i++) (horizontal[i] ? drawers : vertical).push(i);
+        const gap = 4;
+        const vSum = vertical.reduce((sum, i) => sum + caps[i], 0);
+        const hSum = drawers.reduce((sum, i) => sum + caps[i], 0);
+        let vBand = boxH;
+        let hBand = 0;
+        let vY = 0;
+        let hY = 0;
+        if (vertical.length > 0 && drawers.length > 0) {
+            const total = vSum + hSum;
+            hBand = Math.max(18, Math.round((boxH - gap) * hSum / total));
+            vBand = boxH - gap - hBand;
+            hY = boxH / 2 - hBand / 2;
+            vY = -boxH / 2 + vBand / 2;
+        }
+        const out: { x: number; y: number; w: number; h: number; horizontal: boolean }[] = caps.map(() => ({
+            x: 0,
+            y: 0,
+            w: 0,
+            h: 0,
+            horizontal: false,
+        }));
+        const placeRow = (indices: number[], bandW: number, bandH: number, y: number, rowHorizontal: boolean) => {
+            if (indices.length === 0) return;
+            const sum = indices.reduce((acc, i) => acc + caps[i], 0) || 1;
+            const gaps = gap * (indices.length - 1);
+            let cursor = -bandW / 2;
+            for (let n = 0; n < indices.length; n++) {
+                const i = indices[n];
+                const w = (bandW - gaps) * caps[i] / sum;
+                out[i] = {
+                    x: cursor + w / 2,
+                    y,
+                    w,
+                    h: bandH,
+                    horizontal: rowHorizontal,
+                };
+                cursor += w + gap;
+            }
+        };
+        placeRow(vertical, boxW, vBand, vY, false);
+        placeRow(drawers, boxW, hBand || boxH, drawers.length > 0 && vertical.length === 0 ? 0 : hY, true);
+        return out;
+    }
+
+    /** 图鉴长按：现拼这一关的缩略、关号和步数。不用胜利分享底。 */
+    private showAlbumShare(levelId: number, level: LevelDef | null, entry: AlbumEntry | undefined) {
+        const old = this.node.getChildByName('SharePreview');
+        if (old) old.destroy();
+        const size = this.canvasSize();
+        const layer = new Node('SharePreview');
+        layer.layer = UI_2D;
+        layer.addComponent(UITransform).setContentSize(size.w, size.h);
+        this.node.addChild(layer);
+        const dim = this.addSprite(layer, 'Dim', this.builtin, size.w, size.h, 0, 0, new Color(48, 48, 48, 160));
+        const card = new Node('Card');
+        card.layer = UI_2D;
+        card.setPosition(0, 40, 0);
+        card.addComponent(UITransform).setContentSize(480, 420);
+        const g = card.addComponent(Graphics);
+        g.fillColor = CREAM;
+        g.roundRect(-240, -210, 480, 420, 32);
+        g.fill();
+        layer.addChild(card);
+        if (level) this.paintAlbumThumb(card, level, entry ? entry.kinds : [], 0, 40, 360, 200);
+        this.addLabel(card, 'Lv', `第 ${levelId} 关`, 32, WALNUT, 400, 42).setPosition(0, -100, 0);
+        this.addLabel(card, 'Status', albumStatusLine(entry), 24, FRAME, 400, 36).setPosition(0, -148, 0);
+        const close = () => {
+            if (layer.isValid) layer.destroy();
+        };
+        dim.on(Node.EventType.TOUCH_END, close, this);
+        this.scheduleOnce(close, 2.4);
     }
 
     /** 分享预览：叠 share_win 成品图 + 文案 Toast，不挡返回。 */
@@ -600,6 +799,13 @@ export class GameController extends Component {
         const raw = sys.localStorage.getItem(CLEARED_KEY);
         const n = raw ? parseInt(raw, 10) : 0;
         return n > 0 ? n : 0;
+    }
+
+    private levelById(id: number): LevelDef | null {
+        for (let i = 0; i < PLAYABLE.length; i++) {
+            if (PLAYABLE[i].id === id) return PLAYABLE[i];
+        }
+        return null;
     }
 
     private markCleared(id: number) {
@@ -648,6 +854,20 @@ export class GameController extends Component {
     private ensureRestFrames(): Promise<void> {
         if (!this.restReady) this.restReady = this.loadRestFrames();
         return this.restReady;
+    }
+
+    private ensureAlbumFrames(): Promise<void> {
+        if (!this.albumReady) this.albumReady = this.loadAlbumFrames();
+        return this.albumReady;
+    }
+
+    /** 图鉴封门和首通章。主页打开图鉴时就要在。 */
+    private loadAlbumFrames(): Promise<void> {
+        return Promise.all([
+            this.loadSlot(this.albumDoor, UUID.albumDoor, (frame) => { this.albumDoor = frame; }),
+            this.loadSlot(this.albumDoorWide, UUID.albumDoorWide, (frame) => { this.albumDoorWide = frame; }),
+            this.loadSlot(this.albumBadge, UUID.albumBadge, (frame) => { this.albumBadge = frame; }),
+        ]).then(() => undefined);
     }
 
     /** 第 2 关起才用到的食物、提示、通关和柜台。bag_xxx 合成图画面不用，不加载。 */
@@ -2708,6 +2928,16 @@ export class GameController extends Component {
             return;
         }
         this.holdWin = true;
+        const prevCleared = this.clearedId();
+        const trayKinds = board.trays.map((tray) => tray.kind);
+        const recorded = noteAlbumWin(
+            sys.localStorage,
+            prevCleared,
+            board.level,
+            board.steps,
+            trayKinds,
+            (id) => this.levelById(id),
+        );
         this.markCleared(board.level.id);
         this.pulseSealedFridge(root);
         this.spawnPrideFlash(root);
@@ -2730,7 +2960,7 @@ export class GameController extends Component {
         }, 0.42);
 
         this.scheduleOnce(() => {
-            this.spawnWinCard(root, board.steps);
+            this.spawnWinCard(root, board.steps, recorded.firstClear);
             this.busy = false;
         }, 0.62);
     }
@@ -2843,7 +3073,7 @@ export class GameController extends Component {
             .start();
     }
 
-    private spawnWinCard(root: Node, steps: number) {
+    private spawnWinCard(root: Node, steps: number, showBadge: boolean) {
         const size = this.canvasSize();
         const wrap = new Node('WinPack');
         wrap.layer = UI_2D;
@@ -2938,10 +3168,13 @@ export class GameController extends Component {
             }, 0.7);
         }
 
-        const badge = this.makeWinAlbumBadge();
-        badge.setPosition(0, -350, 0);
-        badge.setScale(0, 0, 1);
-        card.addChild(badge);
+        let badge: Node | null = null;
+        if (showBadge) {
+            badge = this.makeWinAlbumBadge();
+            badge.setPosition(0, -350, 0);
+            badge.setScale(0, 0, 1);
+            card.addChild(badge);
+        }
 
         tween(cardOp).to(0.22, { opacity: 255 }).start();
         tween(card)
@@ -2989,6 +3222,7 @@ export class GameController extends Component {
                 .start();
         }, 0.78);
         this.scheduleOnce(() => {
+            if (!badge) return;
             tween(badge)
                 .to(0.28, { scale: new Vec3(1.08, 1.08, 1) }, { easing: easing.backOut })
                 .to(0.1, { scale: new Vec3(1, 1, 1) })
@@ -3089,6 +3323,10 @@ export class GameController extends Component {
         const chip = new Node('AlbumChip');
         chip.layer = UI_2D;
         chip.addComponent(UITransform).setContentSize(220, 56);
+        if (this.albumBadge) {
+            this.addSprite(chip, 'Art', this.albumBadge, 220, 56, 0, 0, Color.WHITE);
+            return chip;
+        }
         const chg = chip.addComponent(Graphics);
         chg.fillColor = new Color(255, 252, 246, 255);
         chg.roundRect(-110, -28, 220, 56, 14);

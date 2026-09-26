@@ -85,13 +85,6 @@ def make_hidden_tray() -> Image.Image:
     return image
 
 
-def make_fridge_shadow() -> Image.Image:
-    image = Image.new("RGBA", (680, 400), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(image)
-    draw.rounded_rectangle((30, 34, 650, 372), radius=64, fill=(61, 50, 41, 80))
-    return image.filter(ImageFilter.GaussianBlur(24))
-
-
 def write_meta(path: Path, uuid: str, has_alpha: bool) -> None:
     with Image.open(path) as image:
         width, height = image.size
@@ -198,7 +191,6 @@ def main() -> None:
     save(SCENE / "bg_play_wall.png", make_wall(), "d1012f55-9340-4b85-ae10-2091d7f20001")
     save(SCENE / "worktop_top.png", make_worktop_top(), "d1022f55-9340-4b85-ae10-2091d7f20002")
     save(SCENE / "worktop_front.png", make_worktop_front(), "d1032f55-9340-4b85-ae10-2091d7f20003")
-    save(SCENE / "fridge_shadow.png", make_fridge_shadow(), "d1042f55-9340-4b85-ae10-2091d7f20004")
     save(BAG / "bag_hidden.png", make_hidden_tray(), "d1052f55-9340-4b85-ae10-2091d7f20005")
 
 

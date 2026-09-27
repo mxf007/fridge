@@ -1,4 +1,4 @@
-import { albumStatusLine, kindsFromLevel, noteAlbumWin, prepareAlbum } from '../assets/scripts/game/AlbumState';
+import { albumGrade, albumStatusLine, kindsFromLevel, noteAlbumWin, prepareAlbum, stepMarks, visibleAlbumGrade, winStepLine } from '../assets/scripts/game/AlbumState';
 import type { AlbumKv } from '../assets/scripts/game/AlbumState';
 import { LEVEL_01 } from '../assets/scripts/game/level_01';
 import { LEVEL_30 } from '../assets/scripts/game/level_30';
@@ -37,6 +37,18 @@ if (!entry || entry.bestSteps !== 4 || entry.firstClearSteps !== 6 || entry.kind
     throw new Error(`replay entry ${JSON.stringify(entry)}`);
 }
 if (albumStatusLine(entry) !== '最佳 4 · 首通 6') throw new Error(albumStatusLine(entry));
+if (entry.grade !== 'walnut') throw new Error(`replay grade ${entry.grade}`);
+const marks = stepMarks(LEVEL_01);
+if (marks.minSteps !== 4 || marks.targetSteps !== 7) throw new Error(`L1 marks ${marks.minSteps}/${marks.targetSteps}`);
+if (albumStatusLine(entry, LEVEL_01) !== '最佳 4 · 首通 6 · 利落 7') throw new Error(albumStatusLine(entry, LEVEL_01));
+if (visibleAlbumGrade(LEVEL_01, entry) !== 'walnut') throw new Error('walnut stamp');
+if (winStepLine(LEVEL_01, 4) !== '完美 4 步 · 利落线 7') throw new Error(winStepLine(LEVEL_01, 4));
+if (albumGrade(LEVEL_01, 6) !== 'sage' || albumGrade(LEVEL_01, 8) !== 'cleared') throw new Error('L1 bands');
+if (winStepLine(LEVEL_01, 6) !== '利落收纳 · 利落线 7 步') throw new Error(winStepLine(LEVEL_01, 6));
+const slip = noteAlbumWin(kv, 1, LEVEL_01, 9, ['milk'], levelById);
+if (slip.firstClear) throw new Error('worse replay is not a first clear');
+const kept = prepareAlbum(kv, 1, levelById).entries['1'];
+if (kept.bestSteps !== 4 || kept.grade !== 'walnut') throw new Error(`grade slipped ${JSON.stringify(kept)}`);
 
 const old = memoryKv();
 const migrated = prepareAlbum(old, 1, levelById);

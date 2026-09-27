@@ -58,6 +58,10 @@ export type LevelDef = {
     bags: FoodId[][];
     buffer: number;
     loseable: boolean;
+    /** 全信息最少步。不填时按件数，因为现行关都有不经柜台的通关。 */
+    theoreticalMinSteps?: number;
+    /** 利落线。不填时按最少步加隐藏层余量，并且至少比最少步多 1。 */
+    targetSteps?: number;
 };
 
 export type TrayState = {

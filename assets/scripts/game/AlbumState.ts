@@ -86,6 +86,11 @@ export function migrateAlbum(file: AlbumFile, cleared: number, levelById: (id: n
 export function prepareAlbum(kv: AlbumKv, cleared: number, levelById: (id: number) => LevelDef | null): AlbumFile {
     const file = readAlbum(kv);
     migrateAlbum(file, cleared, levelById);
+    const keys = Object.keys(file.entries);
+    for (let i = 0; i < keys.length; i++) {
+        const id = Number(keys[i]);
+        writeGrade(file.entries[keys[i]], levelById(id));
+    }
     writeAlbum(kv, file);
     return file;
 }
@@ -118,14 +123,77 @@ export function noteAlbumWin(
     } else if (existing.bestSteps == null || steps < existing.bestSteps) {
         existing.bestSteps = steps;
     }
+    writeGrade(file.entries[key], level);
     writeAlbum(kv, file);
     return { firstClear };
 }
 
-export function albumStatusLine(entry: AlbumEntry | null | undefined): string {
-    if (!entry || entry.bestSteps == null) return '已收';
-    if (entry.firstClearSteps != null && entry.firstClearSteps !== entry.bestSteps) {
-        return `最佳 ${entry.bestSteps} · 首通 ${entry.firstClearSteps}`;
+/** 现行关都有一条不经柜台的通关，每件食材只计一步，所以全信息最少步等于件数。 */
+export function pieceCount(level: LevelDef): number {
+    let n = 0;
+    for (let c = 0; c < level.bags.length; c++) n += level.bags[c].length;
+    return n;
+}
+
+function maxBagDepth(level: LevelDef): number {
+    let depth = 0;
+    for (let c = 0; c < level.bags.length; c++) {
+        if (level.bags[c].length > depth) depth = level.bags[c].length;
     }
-    return `最佳 ${entry.bestSteps} 步`;
+    return depth;
+}
+
+/**
+ * 利落线 = 最少步 + 隐藏层余量。余量至少 1，所以利落不会和完美重合。
+ * 最深列每多一层，余量加 1。关卡上写了 theoreticalMinSteps / targetSteps 时以关卡为准。
+ */
+export function stepMarks(level: LevelDef): { minSteps: number; targetSteps: number } {
+    const minSteps = level.theoreticalMinSteps != null ? level.theoreticalMinSteps : pieceCount(level);
+    const margin = Math.max(1, maxBagDepth(level) - 1);
+    const targetSteps = level.targetSteps != null ? level.targetSteps : minSteps + margin;
+    return { minSteps, targetSteps: Math.max(minSteps + 1, targetSteps) };
+}
+
+/** 完美优先于利落。没有步数，或步数高于利落线，不算章。 */
+export function albumGrade(level: LevelDef, steps: number): AlbumGrade {
+    const marks = stepMarks(level);
+    if (steps === marks.minSteps) return 'walnut';
+    if (steps <= marks.targetSteps) return 'sage';
+    return 'cleared';
+}
+
+/** 有最佳步数、并且步数达到利落或完美时，才挂对应的章。 */
+export function visibleAlbumGrade(level: LevelDef | null, entry: AlbumEntry | null | undefined): AlbumGrade | null {
+    if (!level || !entry || entry.bestSteps == null) return null;
+    const grade = albumGrade(level, entry.bestSteps);
+    if (grade === 'cleared') return null;
+    return grade;
+}
+
+function writeGrade(entry: AlbumEntry, level: LevelDef | null): void {
+    if (!level || entry.bestSteps == null) {
+        entry.grade = 'cleared';
+        return;
+    }
+    entry.grade = albumGrade(level, entry.bestSteps);
+}
+
+export function albumStatusLine(entry: AlbumEntry | null | undefined, level?: LevelDef | null): string {
+    let line = '已收';
+    if (entry && entry.bestSteps != null) {
+        if (entry.firstClearSteps != null && entry.firstClearSteps !== entry.bestSteps) {
+            line = `最佳 ${entry.bestSteps} · 首通 ${entry.firstClearSteps}`;
+        } else {
+            line = `最佳 ${entry.bestSteps} 步`;
+        }
+    }
+    if (!level) return line;
+    return `${line} · 利落 ${stepMarks(level).targetSteps}`;
+}
+
+export function winStepLine(level: LevelDef, steps: number): string {
+    const marks = stepMarks(level);
+    if (steps === marks.minSteps) return `完美 ${steps} 步 · 利落线 ${marks.targetSteps}`;
+    if (steps <= marks.targetSteps) return `利落收纳 · 利落线 ${marks.targetSteps} 步`;
+    return `利落线 ${marks.targetSteps} 步`;
 }

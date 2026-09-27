@@ -1,71 +1,66 @@
 import { BoardState } from './BoardState';
+import { assertRedoLayout, playScript } from './levelLayout';
 import { assertLevel } from './types';
 import type { LevelDef } from './types';
 
-/** 第 15 关：中间 Boss。四格四列，每列三色，顶层四种散开。柜台开，可不用。过关可晒步数。 */
+/** 第 15 关：冰箱能收就直接放。锁进错误容量会锁死。只有所有冰箱格都收不了时，才必须放柜台。 */
 export const LEVEL_15: LevelDef = {
     id: 15,
     title: '今晚这一层最难',
     teach: '本段最难。过关可晒步数',
-    trays: [{ cap: 3 }, { cap: 3 }, { cap: 3 }, { cap: 3 }],
+    trays: [{ cap: 4 }, { cap: 3 }, { cap: 3 }, { cap: 2 }],
     bags: [
-        ['meat', 'fruit', 'veg'],
-        ['milk', 'meat', 'fruit'],
+        ['milk', 'veg', 'meat'],
+        ['fruit', 'milk', 'veg'],
+        ['milk', 'fruit', 'fruit'],
         ['veg', 'milk', 'meat'],
-        ['fruit', 'veg', 'milk'],
     ],
     buffer: 3,
-    loseable: false,
+    loseable: true,
 };
-
-function columnKinds(col: string[]): number {
-    const set: Record<string, true> = {};
-    for (let i = 0; i < col.length; i++) set[col[i]] = true;
-    return Object.keys(set).length;
-}
 
 export function selfCheckLevel15(): void {
     assertLevel(LEVEL_15);
-    const b = BoardState.fromLevel(LEVEL_15);
-    if (!b.bufferEnabled) throw new Error('L15 bufferEnabled must be true');
-    if (b.trays.length !== 4 || b.bags.length !== 4) throw new Error('L15 must be 4 trays and 4 bags');
-    if (b.peekBag(0) !== 'veg' || b.peekBag(1) !== 'fruit' || b.peekBag(2) !== 'meat' || b.peekBag(3) !== 'milk') {
-        throw new Error('L15 tops must scatter veg / fruit / meat / milk');
-    }
-    for (let c = 0; c < LEVEL_15.bags.length; c++) {
-        if (columnKinds(LEVEL_15.bags[c]) !== 3) throw new Error(`L15 bag ${c} must mix three kinds`);
-    }
+    assertRedoLayout(LEVEL_15);
+    const opened = BoardState.fromLevel(LEVEL_15);
+    const first = opened.placeFromBag(0);
+    if (!first.ok) throw new Error(`L15 fridge must take the top, got ${first.reason}`);
+    if (opened.steps !== 1) throw new Error('L15 place must count a step');
 
-    const dump = BoardState.fromLevel(LEVEL_15);
-    dump.placeFromBag(0);
-    const second = dump.placeFromBag(0);
-    if (second.ok || second.reason !== 'wrong_kind') {
-        throw new Error('L15 must not dump a column into one tray');
-    }
-
-    const play = BoardState.fromLevel(LEVEL_15);
-    const script: { tray?: number; bag: number }[] = [
-        { bag: 0 },
+    const winScript = [
         { tray: 1, bag: 1 },
+        { tray: 0, bag: 1 },
+        { tray: 2, bag: 1 },
         { tray: 2, bag: 2 },
+        { tray: 2, bag: 2 },
+        { tray: 0, bag: 2 },
+        { tray: 3, bag: 0 },
+        { tray: 1, bag: 0 },
+        { tray: 0, bag: 0 },
         { tray: 3, bag: 3 },
         { tray: 0, bag: 3 },
-        { tray: 1, bag: 0 },
-        { tray: 2, bag: 0 },
-        { bag: 1 },
-        { tray: 3, bag: 1 },
-        { bag: 2 },
-        { bag: 2 },
-        { bag: 3 },
+        { tray: 1, bag: 3 },
     ];
-    for (let i = 0; i < script.length; i++) {
-        const step = script[i];
-        if (step.tray != null) play.selectTray(step.tray);
-        const r = play.placeFromBag(step.bag);
-        if (!r.ok) throw new Error(`L15 script ${i} failed: ${r.reason}`);
-    }
-    if (!play.isWin() || play.steps !== 12) throw new Error('L15 must win in 12 steps');
-    const kinds = play.trays.map((t) => t.kind).sort().join(',');
-    if (kinds !== 'fruit,meat,milk,veg') throw new Error(`L15 must lock four kinds, got ${kinds}`);
-    if (play.dest && play.dest.kind === 'buffer') throw new Error('L15 win must not keep buffer dest');
+    const play = BoardState.fromLevel(LEVEL_15);
+    const peak = playScript(play, winScript, 'L15');
+    if (!play.isWin() || play.steps !== winScript.length) throw new Error(`L15 win steps ${play.steps}`);
+    if (peak !== 0) throw new Error(`L15 should not need the counter, peak ${peak}`);
+
+    const wasteScript = [
+        { tray: 0, bag: 0 },
+        { tray: 0, bag: 3 },
+        { tray: 1, bag: 0 },
+        { tray: 1, bag: 1 },
+        { tray: 2, bag: 2 },
+        { tray: 2, bag: 2 },
+        { tray: 3, bag: 0 },
+        { tray: 3, bag: 1 },
+        { tray: 2, bag: 1 },
+        { buffer: 0, bag: 2 },
+        { buffer: 1, bag: 3 },
+    ];
+    const fail = BoardState.fromLevel(LEVEL_15);
+    playScript(fail, wasteScript, 'L15 waste');
+    if (fail.isWin() || fail.failReason() !== 'locked_out') throw new Error(`L15 waste ${fail.failReason()}`);
+    if (LEVEL_15.loseable !== true) throw new Error('L15 loseable');
 }

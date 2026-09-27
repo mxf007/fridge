@@ -1,97 +1,70 @@
 import { BoardState } from './BoardState';
+import { assertRedoLayout, playScript } from './levelLayout';
+import { auditVisibleInformation } from './VisibleInformationAudit';
 import { assertLevel } from './types';
 import type { LevelDef } from './types';
 
-/** 第 17 关：混容量。小格在左（默认更安全）。大件必须进大格。可失败。 */
+/** 第 17 关：冰箱能收就直接放。锁进错误容量会锁死。只有所有冰箱格都收不了时，才必须放柜台。 */
 export const LEVEL_17: LevelDef = {
     id: 17,
     title: '大件要进大格',
-    teach: '小格在左。大件必须进大格',
+    teach: '小格在左。水果两件进小格',
     trays: [{ cap: 2 }, { cap: 4 }, { cap: 2 }, { cap: 4 }],
     bags: [
-        ['veg', 'veg', 'fruit', 'fruit'],
-        ['veg', 'veg', 'milk', 'milk'],
-        ['veg', 'veg', 'milk', 'milk'],
+        ['milk', 'veg', 'fruit'],
+        ['milk', 'veg', 'fruit'],
+        ['milk', 'veg', 'veg'],
+        ['milk', 'veg', 'veg'],
     ],
     buffer: 3,
     loseable: true,
 };
 
-function run(board: BoardState, script: { tray?: number; bag: number }[]) {
-    for (let i = 0; i < script.length; i++) {
-        const step = script[i];
-        if (step.tray != null) board.selectTray(step.tray);
-        const r = board.placeFromBag(step.bag);
-        if (!r.ok) throw new Error(`L17 script ${i} failed: ${r.reason}`);
-    }
-}
-
 export function selfCheckLevel17(): void {
     assertLevel(LEVEL_17);
-    const b = BoardState.fromLevel(LEVEL_17);
-    if (!b.bufferEnabled) throw new Error('L17 bufferEnabled must be true');
-    if (b.trays.map((t) => t.cap).join(',') !== '2,4,2,4') throw new Error('L17 caps must be 2,4,2,4');
-    if (b.bags.length !== 3 || b.bags[0].length !== 4) throw new Error('L17 must be 3×4 bags');
-    if (b.peekBag(0) !== 'fruit' || b.peekBag(1) !== 'milk' || b.peekBag(2) !== 'milk') {
-        throw new Error('L17 tops must be fruit / milk / milk');
-    }
-    if (!b.dest || b.dest.kind !== 'tray' || b.dest.index !== 0) {
-        throw new Error('L17 default dest must be leftmost small tray');
-    }
-    if (b.trays[0].cap !== 2) throw new Error('L17 leftmost tray must be small');
+    assertRedoLayout(LEVEL_17);
+    const audit = auditVisibleInformation(LEVEL_17);
+    if (!audit.passes) throw new Error(`L17 audit failed: ${audit.failures.join(',')}`);
 
-    const counts: Record<string, number> = {};
-    const items = LEVEL_17.bags.flat();
-    for (let i = 0; i < items.length; i++) counts[items[i]] = (counts[items[i]] || 0) + 1;
-    if (counts.fruit !== 2 || counts.milk !== 4 || counts.veg !== 6) {
-        throw new Error('L17 counts must be fruit 2 / milk 4 / veg 6');
-    }
+    const opened = BoardState.fromLevel(LEVEL_17);
+    const first = opened.placeFromBag(0);
+    if (!first.ok) throw new Error(`L17 fridge must take the top, got ${first.reason}`);
+    if (opened.steps !== 1) throw new Error('L17 place must count a step');
 
+    const winScript = [
+        { tray: 0, bag: 0 },
+        { tray: 0, bag: 1 },
+        { tray: 1, bag: 0 },
+        { tray: 1, bag: 1 },
+        { tray: 1, bag: 2 },
+        { tray: 1, bag: 2 },
+        { tray: 3, bag: 0 },
+        { tray: 3, bag: 1 },
+        { tray: 3, bag: 2 },
+        { tray: 2, bag: 3 },
+        { tray: 2, bag: 3 },
+        { tray: 3, bag: 3 },
+    ];
     const play = BoardState.fromLevel(LEVEL_17);
-    run(play, [
-        { bag: 0 },
-        { bag: 0 },
-        { bag: 1 },
-        { bag: 1 },
-        { bag: 2 },
-        { bag: 2 },
-        { bag: 1 },
-        { bag: 1 },
-        { bag: 0 },
-        { bag: 0 },
-        { bag: 2 },
-        { bag: 2 },
-    ]);
-    if (!play.isWin() || play.steps !== 12) throw new Error('L17 safe path must win in 12 steps');
-    if (play.trays[0].kind !== 'fruit' || play.trays[1].kind !== 'milk') {
-        throw new Error('L17 safe path must put fruit in small and milk in large');
-    }
+    const peak = playScript(play, winScript, 'L17');
+    if (!play.isWin() || play.steps !== winScript.length) throw new Error(`L17 win steps ${play.steps}`);
+    if (peak !== 0) throw new Error(`L17 should not need the counter, peak ${peak}`);
 
+    const wasteScript = [
+        { tray: 1, bag: 0 },
+        { tray: 1, bag: 1 },
+        { tray: 0, bag: 0 },
+        { tray: 0, bag: 1 },
+        { tray: 3, bag: 0 },
+        { tray: 3, bag: 1 },
+        { tray: 2, bag: 2 },
+        { tray: 2, bag: 2 },
+        { tray: 3, bag: 2 },
+        { buffer: 0, bag: 3 },
+        { buffer: 1, bag: 3 },
+    ];
     const fail = BoardState.fromLevel(LEVEL_17);
-    fail.placeFromBag(1);
-    fail.placeFromBag(1);
-    if (fail.trays[0].kind !== 'milk' || !fail.trays[0].sealed) {
-        throw new Error('L17 waste path must lock milk into the small tray');
-    }
-    fail.placeFromBag(2);
-    fail.placeFromBag(2);
-    if (fail.trays[1].kind !== 'milk' || fail.trays[1].items.length !== 2) {
-        throw new Error('L17 waste path must split remaining milk into a large tray');
-    }
-    fail.selectTray(3);
-    fail.placeFromBag(0);
-    fail.placeFromBag(0);
-    fail.selectTray(2);
-    fail.placeFromBag(1);
-    fail.placeFromBag(1);
-    fail.selectBuffer(0);
-    fail.placeFromBag(0);
-    fail.selectBuffer(1);
-    fail.placeFromBag(0);
-    fail.selectBuffer(2);
-    fail.placeFromBag(2);
-    if (fail.isWin() || fail.failReason() == null) {
-        throw new Error('L17 waste path must become unsolvable');
-    }
-    if (fail.level.loseable !== true) throw new Error('L17 loseable must be true');
+    playScript(fail, wasteScript, 'L17 waste');
+    if (fail.isWin() || fail.failReason() !== 'locked_out') throw new Error(`L17 waste ${fail.failReason()}`);
+    if (LEVEL_17.loseable !== true) throw new Error('L17 loseable');
 }

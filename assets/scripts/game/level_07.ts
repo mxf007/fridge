@@ -1,4 +1,5 @@
 import { BoardState } from './BoardState';
+import { assertRedoLayout } from './levelLayout';
 import { assertLevel } from './types';
 import type { LevelDef } from './types';
 
@@ -18,6 +19,7 @@ export const LEVEL_07: LevelDef = {
 
 export function selfCheckLevel07(): void {
     assertLevel(LEVEL_07);
+    assertRedoLayout(LEVEL_07);
     const b = BoardState.fromLevel(LEVEL_07);
     if (b.bufferEnabled) throw new Error('L7 bufferEnabled must be false');
     if (b.trays.length !== 2 || b.trays[0].cap !== 3 || b.trays[1].cap !== 3) {

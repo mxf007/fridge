@@ -42,7 +42,7 @@ export const FOOD_NAMES: Record<FoodId, string> = {
     coconut: '椰子',
 };
 
-export type PlaceReason = 'wrong_kind' | 'anti_split' | 'no_target' | 'dest_full';
+export type PlaceReason = 'wrong_kind' | 'anti_split' | 'need_buffer' | 'no_target' | 'dest_full';
 
 export type FailReason = 'buffer_full' | 'locked_out';
 

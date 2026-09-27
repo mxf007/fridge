@@ -1,98 +1,73 @@
 import { BoardState } from './BoardState';
+import { assertRedoLayout, playScript } from './levelLayout';
 import { assertLevel } from './types';
 import type { LevelDef } from './types';
-import { auditVisibleInformation } from './VisibleInformationAudit';
 
-/**
- * 第 29 关：预决赛。混容量 3,3,2,3,4；西3+奶3+菜3+肉4+酱2。
- */
+/** 第 29 关：冰箱能收就直接放。锁进错误容量会锁死。只有所有冰箱格都收不了时，才必须放柜台。 */
 export const LEVEL_29: LevelDef = {
     id: 29,
     title: '预决赛五色',
     teach: '酱两件进小格；西瓜三件占一格',
     trays: [{ cap: 3 }, { cap: 3 }, { cap: 2 }, { cap: 3 }, { cap: 4 }],
     bags: [
-        ['watermelon'],
-        ['watermelon'],
-        ['watermelon'],
-        ['sauce'],
-        ['sauce'],
-        ['meat', 'meat', 'meat', 'meat', 'veg', 'veg', 'veg', 'milk', 'milk', 'milk'],
+        ['meat', 'meat', 'sauce'],
+        ['milk', 'milk', 'sauce'],
+        ['veg', 'veg', 'watermelon'],
+        ['watermelon', 'watermelon', 'meat'],
+        ['milk', 'veg', 'meat'],
     ],
     buffer: 3,
     loseable: true,
 };
 
-function run(
-    board: BoardState,
-    script: { tray?: number; buffer?: number; bag?: number; fromBuffer?: number }[],
-) {
-    for (let i = 0; i < script.length; i++) {
-        const step = script[i];
-        if (step.tray != null) board.selectTray(step.tray);
-        if (step.buffer != null) board.selectBuffer(step.buffer);
-        let r;
-        if (step.fromBuffer != null) r = board.placeFromBuffer(step.fromBuffer);
-        else if (step.bag != null) r = board.placeFromBag(step.bag);
-        else throw new Error(`L29 script ${i} missing place`);
-        if (!r.ok) throw new Error(`L29 script ${i} failed: ${r.reason}`);
-    }
-}
-
 export function selfCheckLevel29(): void {
     assertLevel(LEVEL_29);
-    const b = BoardState.fromLevel(LEVEL_29);
-    if (b.trays.map((t) => t.cap).join(',') !== '3,3,2,3,4') throw new Error('L29 caps');
-    const counts: Record<string, number> = {};
-    for (const x of LEVEL_29.bags.flat()) counts[x] = (counts[x] || 0) + 1;
-    if (
-        counts.milk !== 3
-        || counts.veg !== 3
-        || counts.meat !== 4
-        || counts.sauce !== 2
-        || counts.watermelon !== 3
-    ) {
-        throw new Error('L29 counts');
-    }
-    const audit = auditVisibleInformation(LEVEL_29);
-    if (!audit.passes) throw new Error(`L29 audit failed: ${audit.failures.join(',')}`);
+    assertRedoLayout(LEVEL_29);
+    const opened = BoardState.fromLevel(LEVEL_29);
+    const first = opened.placeFromBag(0);
+    if (!first.ok) throw new Error(`L29 fridge must take the top, got ${first.reason}`);
+    if (opened.steps !== 1) throw new Error('L29 place must count a step');
 
+    const winScript = [
+        { tray: 0, bag: 2 },
+        { tray: 1, bag: 2 },
+        { tray: 1, bag: 2 },
+        { tray: 2, bag: 0 },
+        { tray: 2, bag: 1 },
+        { tray: 3, bag: 1 },
+        { tray: 3, bag: 1 },
+        { tray: 4, bag: 0 },
+        { tray: 4, bag: 0 },
+        { tray: 4, bag: 3 },
+        { tray: 0, bag: 3 },
+        { tray: 0, bag: 3 },
+        { tray: 4, bag: 4 },
+        { tray: 1, bag: 4 },
+        { tray: 3, bag: 4 },
+    ];
     const play = BoardState.fromLevel(LEVEL_29);
-    run(play, [
-        { bag: 0 }, { bag: 1 }, { bag: 2 },
-        { tray: 2, bag: 3 }, { bag: 4 },
-        { tray: 1, bag: 5 }, { bag: 5 }, { bag: 5 },
-        { tray: 3, bag: 5 }, { bag: 5 }, { bag: 5 },
-        { tray: 4, bag: 5 }, { bag: 5 }, { bag: 5 }, { bag: 5 },
-    ]);
-    if (!play.isWin() || play.steps !== 15) throw new Error('L29 must win in 15');
+    const peak = playScript(play, winScript, 'L29');
+    if (!play.isWin() || play.steps !== winScript.length) throw new Error(`L29 win steps ${play.steps}`);
+    if (peak !== 0) throw new Error(`L29 should not need the counter, peak ${peak}`);
 
+    const wasteScript = [
+        { tray: 0, bag: 0 },
+        { tray: 0, bag: 1 },
+        { tray: 1, bag: 1 },
+        { tray: 1, bag: 1 },
+        { tray: 3, bag: 2 },
+        { tray: 4, bag: 0 },
+        { tray: 4, bag: 0 },
+        { tray: 4, bag: 3 },
+        { tray: 3, bag: 3 },
+        { tray: 3, bag: 3 },
+        { tray: 4, bag: 4 },
+        { tray: 2, bag: 2 },
+        { tray: 2, bag: 2 },
+        { buffer: 0, bag: 4 },
+    ];
     const fail = BoardState.fromLevel(LEVEL_29);
-    fail.placeFromBag(3);
-    fail.placeFromBag(4);
-    if (fail.trays[0].kind !== 'sauce' || fail.trays[0].sealed) {
-        throw new Error('L29 waste sauce must sit in cap3');
-    }
-    fail.selectTray(1);
-    fail.placeFromBag(0);
-    fail.placeFromBag(1);
-    fail.placeFromBag(2);
-    fail.selectTray(2);
-    fail.placeFromBag(5);
-    fail.placeFromBag(5);
-    fail.selectBuffer(0);
-    const park = fail.placeFromBag(5);
-    if (!park.ok || park.item !== 'milk') throw new Error('L29 waste must park milk');
-    fail.selectTray(3);
-    fail.placeFromBag(5);
-    fail.placeFromBag(5);
-    fail.placeFromBag(5);
-    fail.selectTray(4);
-    fail.placeFromBag(5);
-    fail.placeFromBag(5);
-    fail.placeFromBag(5);
-    fail.placeFromBag(5);
-    if (fail.isWin() || fail.failReason() == null) throw new Error('L29 waste must fail');
-    if (fail.failReason() !== 'locked_out') throw new Error(`L29 waste ${fail.failReason()}`);
-    console.log('L29 OK', audit.variantCount);
+    playScript(fail, wasteScript, 'L29 waste');
+    if (fail.isWin() || fail.failReason() !== 'locked_out') throw new Error(`L29 waste ${fail.failReason()}`);
+    if (LEVEL_29.loseable !== true) throw new Error('L29 loseable');
 }

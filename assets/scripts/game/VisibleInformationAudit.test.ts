@@ -65,16 +65,28 @@ export function selfCheckVisibleInformationAudit(): void {
     if (!visibleChoice.passes) {
         throw new Error(`visible capacity fixture failed: ${visibleChoice.failures.join(',')}`);
     }
-    if (visibleChoice.maxHiddenDepth !== 1) throw new Error('level 9 fixture must be fully visible');
     if (visibleChoice.initialSafeActionCount <= 0) throw new Error('level 9 fixture needs a safe route');
     if (visibleChoice.initialSafeActionCount >= visibleChoice.initialLegalActionCount) {
         throw new Error('level 9 fixture needs a visible wrong-capacity route');
     }
 
     const hiddenNine = auditVisibleInformation(HIDDEN_LEVEL_9);
-    if (hiddenNine.passes || hiddenNine.failures.indexOf('level_9_must_be_fully_visible') < 0) {
-        throw new Error('level 9 audit must reject anonymous lower layers');
+    if (hiddenNine.passes || hiddenNine.failures.indexOf('level_9_small_kind_not_on_top') < 0) {
+        throw new Error('level 9 audit must reject a small kind buried under the top');
     }
+
+    const deepButCounted: LevelDef = {
+        ...VISIBLE_CAPACITY_CHOICE,
+        bags: [
+            ['veg', 'milk'],
+            ['veg', 'milk'],
+            ['veg'],
+            ['veg'],
+        ],
+    };
+    const deepNine = auditVisibleInformation(deepButCounted);
+    if (!deepNine.passes) throw new Error(`level 9 depth-2 counted fixture failed: ${deepNine.failures.join(',')}`);
+    if (deepNine.maxHiddenDepth < 2) throw new Error('level 9 depth-2 fixture must keep a buried layer');
 
     const buffered = auditVisibleInformation(BUFFERED_HIDDEN);
     if (!buffered.passes) throw new Error(`buffered hidden fixture failed: ${buffered.failures.join(',')}`);

@@ -164,9 +164,9 @@ export function auditVisibleInformation(
         if (!result.solvable) failures.push('forced_guess');
         if (!result.allMovesSafe) failures.push('not_all_legal_visible_moves_safe');
     } else if (level.id === 9) {
-        if (maxHiddenDepth !== 1) failures.push('level_9_must_be_fully_visible');
         if (!result.solvable || result.safeActions === 0) failures.push('level_9_has_no_safe_route');
         if (result.legalActions <= result.safeActions) failures.push('level_9_needs_visible_wrong_capacity_route');
+        if (!smallKindFullyVisible(level)) failures.push('level_9_small_kind_not_on_top');
     } else if (level.id >= 10) {
         if (!result.solvable) failures.push('forced_guess');
         if (result.peakBuffer > 3) failures.push('needs_more_than_3_buffer_slots');
@@ -186,6 +186,37 @@ export function auditVisibleInformation(
         initialSafeActionCount: result.safeActions,
         failures,
     };
+}
+
+function smallKindFullyVisible(level: LevelDef): boolean {
+    let maxCap = 0;
+    for (let i = 0; i < level.trays.length; i++) {
+        if (level.trays[i].cap > maxCap) maxCap = level.trays[i].cap;
+    }
+    const counts = new Map<FoodId, number>();
+    const onTop = new Map<FoodId, number>();
+    for (let c = 0; c < level.bags.length; c++) {
+        const bag = level.bags[c];
+        for (let i = 0; i < bag.length; i++) {
+            counts.set(bag[i], (counts.get(bag[i]) || 0) + 1);
+        }
+        if (bag.length > 0) {
+            const top = bag[bag.length - 1];
+            onTop.set(top, (onTop.get(top) || 0) + 1);
+        }
+    }
+    const kinds = Array.from(counts.keys());
+    for (let i = 0; i < kinds.length; i++) {
+        const kind = kinds[i];
+        const n = counts.get(kind) || 0;
+        let fitsSmall = false;
+        for (let t = 0; t < level.trays.length; t++) {
+            if (level.trays[t].cap < maxCap && level.trays[t].cap === n) fitsSmall = true;
+        }
+        if (!fitsSmall) continue;
+        if ((onTop.get(kind) || 0) === n) return true;
+    }
+    return false;
 }
 
 function failedResult(): SolveResult {

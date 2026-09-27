@@ -25,6 +25,7 @@ import {
     view,
 } from 'cc';
 import { BoardState } from './game/BoardState';
+import { packTrayGrid, TRAY_GAP, TRAY_WALL_H, TRAY_WALL_TOP, TRAY_WALL_W } from './game/levelLayout';
 import { LEVEL_01 } from './game/level_01';
 import { LEVEL_02 } from './game/level_02';
 import { LEVEL_03 } from './game/level_03';
@@ -171,6 +172,7 @@ const ALBUM_SCROLL_SLOP = 14;
 const TOAST: Record<PlaceReason, string> = {
     wrong_kind: '这格只收牛奶',
     anti_split: '牛奶那格还没收满，不能新开一格',
+    need_buffer: '冰箱放不下，先放到柜台',
     no_target: '先点要放进的格子',
     dest_full: '这格收好了，换一格',
 };
@@ -278,9 +280,12 @@ export class GameController extends Component {
     private albumReady: Promise<void> | null = null;
     private albumToken = 0;
     private enteringLevel = false;
+    /** 控制台 gm(关卡号) 指定后，开始收拾进这一关。不改通关进度。 */
+    private gmLevelId: number | null = null;
 
     onLoad() {
         // 自检含可见信息审计，同步跑会把预览进度条卡住。用 tools/run_level_selfchecks_19_30.ts。
+        this.bindGm();
         this.bindHome();
         this.refreshAlbumLink();
         void this.ensureLevel1Frames();
@@ -289,6 +294,27 @@ export class GameController extends Component {
         void this.loadSlot(this.btnStart, UUID.btnStart, (frame) => { this.btnStart = frame; }).then(() => {
             if (this.node && this.node.isValid) this.polishHomeChrome();
         });
+    }
+
+    /** 预览控制台：gm(24) 之后点「开始收拾」进第 24 关。gm(0) 取消。 */
+    private bindGm() {
+        const host = globalThis as { gm?: (level?: number) => void };
+        host.gm = (level?: number) => {
+            if (level == null || Number(level) === 0) {
+                this.gmLevelId = null;
+                console.log('[fridge] gm 已取消，开始收拾按通关进度进关');
+                return;
+            }
+            const id = Math.floor(Number(level));
+            const found = this.levelById(id);
+            if (!found) {
+                console.log(`[fridge] 没有第 ${level} 关`);
+                return;
+            }
+            this.gmLevelId = id;
+            console.log(`[fridge] 已指定第 ${id} 关，点开始收拾进入`);
+        };
+        console.log('[fridge] 调关：gm(24)，再点开始收拾');
     }
 
     private bindHome() {
@@ -637,7 +663,7 @@ export class GameController extends Component {
         thumb.addComponent(UITransform).setContentSize(boxW, boxH);
         parent.addChild(thumb);
         const caps = level.trays.map((tray) => tray.cap);
-        const cells = this.albumThumbCells(caps, boxW - 8, boxH - 8);
+        const cells = this.albumThumbCells(level.id, caps, boxW - 8, boxH - 8);
         for (let i = 0; i < cells.length; i++) {
             const cell = cells[i];
             const frame = new Node(`Cell${i}`);
@@ -678,58 +704,35 @@ export class GameController extends Component {
         }
     }
 
-    private albumThumbCells(caps: number[], boxW: number, boxH: number): {
+    private albumThumbCells(levelId: number, caps: number[], boxW: number, boxH: number): {
         x: number;
         y: number;
         w: number;
         h: number;
         horizontal: boolean;
     }[] {
-        const horizontal = this.trayOrient(caps);
-        const vertical: number[] = [];
-        const drawers: number[] = [];
-        for (let i = 0; i < caps.length; i++) (horizontal[i] ? drawers : vertical).push(i);
-        const gap = 4;
-        const vSum = vertical.reduce((sum, i) => sum + caps[i], 0);
-        const hSum = drawers.reduce((sum, i) => sum + caps[i], 0);
-        let vBand = boxH;
-        let hBand = 0;
-        let vY = 0;
-        let hY = 0;
-        if (vertical.length > 0 && drawers.length > 0) {
-            const total = vSum + hSum;
-            hBand = Math.max(18, Math.round((boxH - gap) * hSum / total));
-            vBand = boxH - gap - hBand;
-            hY = boxH / 2 - hBand / 2;
-            vY = -boxH / 2 + vBand / 2;
+        const grid = packTrayGrid(levelId, caps);
+        const pitch = Math.min(boxW / grid.cols, boxH / grid.rows);
+        const gap = pitch * (TRAY_GAP / 109);
+        const packW = grid.cols * pitch;
+        const packH = grid.rows * pitch;
+        const out: { x: number; y: number; w: number; h: number; horizontal: boolean }[] = [];
+        for (let i = 0; i < grid.cells.length; i++) {
+            const cell = grid.cells[i];
+            const w = cell.spanW * pitch - gap;
+            const h = cell.spanH * pitch - gap;
+            out.push({
+                x: -packW / 2 + cell.col * pitch + gap / 2 + w / 2,
+                y: packH / 2 - (cell.row * pitch + gap / 2 + h / 2),
+                w,
+                h,
+                horizontal: cell.horizontal,
+            });
         }
-        const out: { x: number; y: number; w: number; h: number; horizontal: boolean }[] = caps.map(() => ({
-            x: 0,
-            y: 0,
-            w: 0,
-            h: 0,
-            horizontal: false,
-        }));
-        const placeRow = (indices: number[], bandW: number, bandH: number, y: number, rowHorizontal: boolean) => {
-            if (indices.length === 0) return;
-            const sum = indices.reduce((acc, i) => acc + caps[i], 0) || 1;
-            const gaps = gap * (indices.length - 1);
-            let cursor = -bandW / 2;
-            for (let n = 0; n < indices.length; n++) {
-                const i = indices[n];
-                const w = (bandW - gaps) * caps[i] / sum;
-                out[i] = {
-                    x: cursor + w / 2,
-                    y,
-                    w,
-                    h: bandH,
-                    horizontal: rowHorizontal,
-                };
-                cursor += w + gap;
-            }
-        };
-        placeRow(vertical, boxW, vBand, vY, false);
-        placeRow(drawers, boxW, hBand || boxH, drawers.length > 0 && vertical.length === 0 ? 0 : hY, true);
+        const shifted: { x: number; outerW: number }[] = [];
+        for (let i = 0; i < out.length; i++) shifted.push({ x: out[i].x, outerW: out[i].w });
+        this.centerLoneTrayRows(grid.cells, shifted, -packW / 2, packW);
+        for (let i = 0; i < out.length; i++) out[i].x = shifted[i].x;
         return out;
     }
 
@@ -941,8 +944,10 @@ export class GameController extends Component {
 
     /**
      * ≥5 列：按开局深度深后浅前；同深按列号稳序；前后排内再按列号左→右。
+     * 第 17 关 4 列也分两排，前排再错开半个盘位。
      */
     private buildBagRowPlan(level: LevelDef): { front: number[]; back: number[] } | null {
+        if (level.id === 17) return { back: [0, 2], front: [1, 3] };
         const n = level.bags.length;
         if (n < BAG_TWO_ROW_MIN) return null;
         const ranked = level.bags.map((col, i) => ({ i, len: col.length }));
@@ -961,6 +966,10 @@ export class GameController extends Component {
     }
 
     private continueLevel(): LevelDef {
+        if (this.gmLevelId != null) {
+            const forced = this.levelById(this.gmLevelId);
+            if (forced) return forced;
+        }
         const nextId = this.clearedId() + 1;
         const next = this.nextPlayable(nextId - 1);
         return next || PLAYABLE[PLAYABLE.length - 1];
@@ -1323,28 +1332,7 @@ export class GameController extends Component {
         return 640 - screenY;
     }
 
-    /**
-     * 相同容量同外形。竖格从大到小整组装入，最多 4 个；
-     * 下一档会超过 4 个时，这一档和更小的全部横放。
-     */
-    private trayOrient(caps: number[]): boolean[] {
-        const horizontal = caps.map(() => false);
-        let used = 0;
-        let overflow = false;
-        for (const cap of [4, 3, 2]) {
-            const idx: number[] = [];
-            for (let i = 0; i < caps.length; i++) if (caps[i] === cap) idx.push(i);
-            if (idx.length === 0) continue;
-            if (overflow || used + idx.length > 4) {
-                overflow = true;
-                for (let n = 0; n < idx.length; n++) horizontal[idx[n]] = true;
-            } else {
-                used += idx.length;
-            }
-        }
-        return horizontal;
-    }
-
+    /** 短边 2P、长边 cap×P，整组居中铺进墙面。横格是竖格转 90 度。 */
     private trayLayout(board: BoardState): {
         horizontal: boolean;
         x: number;
@@ -1357,40 +1345,13 @@ export class GameController extends Component {
         cap: number;
     }[] {
         const caps = board.trays.map((t) => t.cap);
-        const horizontal = this.trayOrient(caps);
-        const vIdx: number[] = [];
-        const hIdx: number[] = [];
-        for (let i = 0; i < caps.length; i++) (horizontal[i] ? hIdx : vIdx).push(i);
-        const vCount = vIdx.length;
-        const hasDrawer = hIdx.length > 0;
-        let vOuterW = 148;
-        let vOuterH = 260;
-        let vFrame = 16;
-        let vGap = 14;
-        if (!hasDrawer) {
-            if (vCount <= 1) {
-                vOuterW = 280;
-                vOuterH = 420;
-                vFrame = 22;
-            } else if (vCount === 2) {
-                vOuterW = 240;
-                vOuterH = 380;
-                vFrame = 20;
-                vGap = 24;
-            } else if (vCount === 3) {
-                vOuterW = 200;
-                vOuterH = 320;
-                vFrame = 18;
-                vGap = 20;
-            }
-        }
-        const vY = hasDrawer
-            ? this.screenToCocosY((336 + 596) / 2)
-            : this.screenToCocosY(180 + vOuterH / 2);
-        const hY = this.screenToCocosY((180 + 284) / 2);
-        const hOuterH = 104;
-        const hFrame = 14;
-        const hGap = 14;
+        const grid = packTrayGrid(board.level.id, caps);
+        const pitch = Math.min(TRAY_WALL_W / grid.cols, TRAY_WALL_H / grid.rows);
+        const packW = grid.cols * pitch;
+        const packH = grid.rows * pitch;
+        const originX = -packW / 2;
+        const originTop = TRAY_WALL_TOP + (TRAY_WALL_H - packH) / 2;
+        const frame = Math.max(8, Math.round(pitch * 0.12));
         const out: {
             horizontal: boolean;
             x: number;
@@ -1401,49 +1362,50 @@ export class GameController extends Component {
             outerW: number;
             outerH: number;
             cap: number;
-        }[] = caps.map((cap) => ({
-            horizontal: false,
-            x: 0,
-            y: vY,
-            slotW: vOuterW - vFrame * 2,
-            slotH: vOuterH - vFrame * 2,
-            frame: vFrame,
-            outerW: vOuterW,
-            outerH: vOuterH,
-            cap,
-        }));
-        let vTotal = vGap * Math.max(vCount - 1, 0) + vOuterW * vCount;
-        let cursor = -vTotal / 2;
-        for (let n = 0; n < vIdx.length; n++) {
-            const i = vIdx[n];
-            out[i].x = cursor + vOuterW / 2;
-            out[i].y = vY;
-            cursor += vOuterW + vGap;
+        }[] = [];
+        for (let i = 0; i < grid.cells.length; i++) {
+            const cell = grid.cells[i];
+            const outerW = cell.spanW * pitch - TRAY_GAP;
+            const outerH = cell.spanH * pitch - TRAY_GAP;
+            const left = originX + cell.col * pitch + TRAY_GAP / 2;
+            const top = originTop + cell.row * pitch + TRAY_GAP / 2;
+            out.push({
+                horizontal: cell.horizontal,
+                x: left + outerW / 2,
+                y: this.screenToCocosY(top + outerH / 2),
+                slotW: outerW - frame * 2,
+                slotH: outerH - frame * 2,
+                frame,
+                outerW,
+                outerH,
+                cap: caps[i],
+            });
         }
-        const hWidths = hIdx.map((i) => (caps[i] <= 2 ? 150 : 210));
-        let hTotal = hGap * Math.max(hIdx.length - 1, 0);
-        for (let n = 0; n < hWidths.length; n++) hTotal += hWidths[n];
-        if (hTotal > 660 && hIdx.length > 0) {
-            const gaps = hGap * Math.max(hIdx.length - 1, 0);
-            const scale = (660 - gaps) / (hTotal - gaps);
-            for (let n = 0; n < hWidths.length; n++) hWidths[n] = Math.floor(hWidths[n] * scale);
-            hTotal = 660;
-        }
-        cursor = -hTotal / 2;
-        for (let n = 0; n < hIdx.length; n++) {
-            const i = hIdx[n];
-            const outerW = hWidths[n];
-            out[i].horizontal = true;
-            out[i].outerW = outerW;
-            out[i].outerH = hOuterH;
-            out[i].frame = hFrame;
-            out[i].slotW = outerW - hFrame * 2;
-            out[i].slotH = hOuterH - hFrame * 2;
-            out[i].x = cursor + outerW / 2;
-            out[i].y = hY;
-            cursor += outerW + hGap;
-        }
+        this.centerLoneTrayRows(grid.cells, out, originX, packW);
         return out;
+    }
+
+    /** 某一行只有一个格子时，把这一格在该行里居中。 */
+    private centerLoneTrayRows(
+        cells: { row: number; spanH: number }[],
+        metrics: { x: number; outerW: number }[],
+        originX: number,
+        packW: number,
+    ) {
+        for (let i = 0; i < cells.length; i++) {
+            const cell = cells[i];
+            let alone = true;
+            for (let j = 0; j < cells.length; j++) {
+                if (i === j) continue;
+                const other = cells[j];
+                if (cell.row < other.row + other.spanH && other.row < cell.row + cell.spanH) {
+                    alone = false;
+                    break;
+                }
+            }
+            if (!alone) continue;
+            metrics[i].x = originX + (packW - metrics[i].outerW) / 2 + metrics[i].outerW / 2;
+        }
     }
 
     private trayAt(index: number) {
@@ -2030,18 +1992,40 @@ export class GameController extends Component {
     ) {
         for (let k = 0; k < items.length; k++) {
             const seat = this.seatBox(slotW, slotH, cap, k, horizontal);
-            const food = Math.min(seat.w * 0.82, seat.h * 0.82);
+            const size = this.trayItemDrawSize(items[k], horizontal, seat);
             this.addSprite(
                 node,
                 `Food${k}`,
                 this.frameForFood(items[k]),
-                food,
-                food,
+                size.w,
+                size.h,
                 seat.x,
                 seat.y,
                 Color.WHITE,
             );
         }
+    }
+
+    /** 横格里的牛奶用盘子上的尺寸，不再放大缩小。 */
+    private trayItemDrawSize(
+        item: FoodId,
+        horizontal: boolean,
+        seat: { w: number; h: number },
+    ): { w: number; h: number } {
+        if (horizontal && item === 'milk') return this.plateFoodSize('milk');
+        const food = Math.min(seat.w, seat.h) * 0.82;
+        return { w: food, h: food };
+    }
+
+    /** 和当前这一排盘子上的食材同一套宽高。 */
+    private plateFoodSize(kind: FoodId): { w: number; h: number } {
+        const board = this.board;
+        const n = board ? board.bags.length : 1;
+        const plan = this.bagRowPlan;
+        const cols = plan && n >= BAG_TWO_ROW_MIN
+            ? Math.max(plan.front.length, plan.back.length, 1)
+            : n;
+        return this.bagFoodSize(kind, this.bagLayout(cols).food);
     }
 
     /** 三列时托盘接近示意图大小；列变多再缩小，避免挤出屏幕。 */
@@ -2115,17 +2099,17 @@ export class GameController extends Component {
     }
 
     private drawBags(root: Node, board: BoardState) {
-        const n = board.bags.length;
         const plan = this.bagRowPlan;
-        if (!plan || n < BAG_TWO_ROW_MIN) {
+        if (!plan) {
             this.drawBagsSingleRow(root, board);
             return;
         }
         const layoutCols = Math.max(plan.front.length, plan.back.length, 1);
         const layout = this.bagLayout(layoutCols);
         // 先后排、再前排：前排叠在上面，可点不被挡
-        this.drawBagRow(root, board, plan.back, layout, 'back');
-        this.drawBagRow(root, board, plan.front, layout, 'front');
+        const stagger = board.level.id === 17 ? (layout.w + layout.gap) / 2 : 0;
+        this.drawBagRow(root, board, plan.back, layout, 'back', 0);
+        this.drawBagRow(root, board, plan.front, layout, 'front', stagger);
         this.revealBagCol = null;
     }
 
@@ -2150,6 +2134,7 @@ export class GameController extends Component {
         cols: number[],
         layout: { w: number; trayH: number; step: number; gap: number; food: number },
         row: 'front' | 'back',
+        xShift = 0,
     ) {
         let maxLen = 0;
         for (let i = 0; i < cols.length; i++) {
@@ -2164,8 +2149,8 @@ export class GameController extends Component {
             const count = board.bags[c].length;
             if (count <= 0) continue;
             const h = this.columnHeight(layout, count);
-            const x = (slot - (rowN - 1) / 2) * (layout.w + layout.gap);
-            const colNode = this.drawOneBagColumn(root, board, c, layout, seat, rowN, slot);
+            const x = (slot - (rowN - 1) / 2) * (layout.w + layout.gap) + xShift;
+            const colNode = this.drawOneBagColumn(root, board, c, layout, seat, rowN, slot, xShift);
             if (colNode && scale !== 1) {
                 colNode.setScale(scale, scale, 1);
                 colNode.setPosition(x, seat + (h * scale) / 2, 0);
@@ -2181,11 +2166,12 @@ export class GameController extends Component {
         baseline: number,
         rowN: number,
         slot: number,
+        xShift = 0,
     ): Node | null {
         const col = board.bags[c];
         const count = col.length;
         if (count <= 0) return null;
-        const x = (slot - (rowN - 1) / 2) * (layout.w + layout.gap);
+        const x = (slot - (rowN - 1) / 2) * (layout.w + layout.gap) + xShift;
         const h = this.columnHeight(layout, count);
         const colNode = new Node(`Bag${c}`);
         colNode.layer = UI_2D;
@@ -2523,7 +2509,7 @@ export class GameController extends Component {
         const item = board.peekBag(col);
         if (!item) return;
         this.dismissSizeIntro();
-        const check = board.canAccept(board.dest, item, 'bag');
+        const check = board.canAccept(board.dest, item, 'bag', board.bags[col].length);
         if (!check.ok) {
             const result = board.placeFromBag(col);
             if (!result.ok) this.showPlaceFail(result);
@@ -2578,12 +2564,12 @@ export class GameController extends Component {
             const seat = this.seatBox(m.slotW, m.slotH, cap, nextCount, m.horizontal);
             const toWorld = trayNode.getComponent(UITransform)!.convertToWorldSpaceAR(new Vec3(seat.x, seat.y, 0));
             to = ui.convertToNodeSpaceAR(toWorld);
-            const end = Math.min(seat.w, seat.h) * 0.82;
             const fromUi = fromNode.getComponent(UITransform);
             const fromScale = fromNode.worldScale;
             flyW = fromUi ? fromUi.contentSize.width * fromScale.x : flyW;
             flyH = fromUi ? fromUi.contentSize.height * fromScale.y : flyH;
-            land = new Vec3(end / flyW, end / flyH, 1);
+            const size = this.trayItemDrawSize(item, m.horizontal, seat);
+            land = new Vec3(size.w / flyW, size.h / flyH, 1);
         }
 
         const flyer = this.addSprite(root, 'Flyer', flyFrame, flyW, flyH, from.x, from.y, Color.WHITE);
@@ -2634,7 +2620,8 @@ export class GameController extends Component {
         const toWorld = trayNode.getComponent(UITransform)!.convertToWorldSpaceAR(new Vec3(seat.x, seat.y, 0));
         const to = ui.convertToNodeSpaceAR(toWorld);
         const flyer = this.addSprite(root, 'Flyer', this.frameForFood(item), 64, 96, from.x, from.y, Color.WHITE);
-        const size = this.trayFoodSize(m.slotH, board.trays[destIndex].cap);
+        const fitted = this.trayFoodSize(m.slotH, board.trays[destIndex].cap);
+        const size = m.horizontal && item === 'milk' ? this.plateFoodSize('milk') : fitted;
         const land = new Vec3(size.w / 64, size.h / 96, 1);
         tween(flyer)
             .to(FLY_SEC, { position: new Vec3(to.x, to.y, 0), scale: land }, { easing: easing.cubicOut })
@@ -2757,9 +2744,9 @@ export class GameController extends Component {
 
     private onFail(reason: FailReason) {
         const board = this.board;
-        const id = board ? board.level.id : 0;
-        if (id < 17) {
-            console.log(`[fridge] unexpected fail L${id} ${reason}`);
+        if (!board) return;
+        if (!board.level.loseable) {
+            console.log(`[fridge] unexpected fail L${board.level.id} ${reason}`);
             this.restartLevel();
             return;
         }
@@ -2784,9 +2771,10 @@ export class GameController extends Component {
                 }
             }
         } else {
-            for (let i = 0; i < board.trays.length; i++) {
-                if (!board.trays[i].sealed) continue;
-                const tray = root.getChildByName(`Tray${i}`);
+            const doomed = board.unfillableTrayIndexes();
+            const indexes = doomed.length > 0 ? doomed : board.trays.map((_, i) => i).filter((i) => board.trays[i].sealed);
+            for (let n = 0; n < indexes.length; n++) {
+                const tray = root.getChildByName(`Tray${indexes[n]}`);
                 if (tray) targets.push(tray);
             }
         }
@@ -3520,7 +3508,7 @@ export class GameController extends Component {
             this.holdHintTrays = result.hintTrays.slice();
             this.attachSwitchGuides();
         }
-        if ((id === 10 || id === 14) && result.reason === 'wrong_kind' && result.hintBuffers.length > 0) {
+        if ((id === 10 || id === 14) && result.hintBuffers.length > 0 && (result.reason === 'wrong_kind' || result.reason === 'need_buffer')) {
             this.holdHintBuffers = result.hintBuffers.slice();
             this.attachBufferGuides();
         }
@@ -3573,6 +3561,9 @@ export class GameController extends Component {
     }
 
     private toastFor(result: PlaceFail): string {
+        if (result.reason === 'need_buffer') {
+            return '冰箱放不下，先放到柜台';
+        }
         if (result.reason === 'wrong_kind') {
             const id = this.board ? this.board.level.id : 0;
             if ((id === 4 || id === 7) && this.firstKindToast) {

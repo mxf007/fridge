@@ -1,4 +1,5 @@
 import { BoardState } from './BoardState';
+import { assertRedoLayout } from './levelLayout';
 import { assertLevel } from './types';
 import type { LevelDef } from './types';
 
@@ -25,6 +26,7 @@ function columnKinds(col: string[]): number {
 
 export function selfCheckLevel08(): void {
     assertLevel(LEVEL_08);
+    assertRedoLayout(LEVEL_08);
     const b = BoardState.fromLevel(LEVEL_08);
     if (b.bufferEnabled) throw new Error('L8 bufferEnabled must be false');
     if (b.trays.length !== 3 || b.bags.length !== 3) throw new Error('L8 must have 3 trays and 3 bags');

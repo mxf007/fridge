@@ -1,12 +1,13 @@
-import type {
-    Dest,
-    FailReason,
-    FoodId,
-    HintPick,
-    LevelDef,
-    PlaceReason,
-    PlaceResult,
-    TrayState,
+import {
+    FOOD_IDS,
+    type Dest,
+    type FailReason,
+    type FoodId,
+    type HintPick,
+    type LevelDef,
+    type PlaceReason,
+    type PlaceResult,
+    type TrayState,
 } from './types';
 
 function cloneBags(bags: FoodId[][]): FoodId[][] {
@@ -68,7 +69,8 @@ export class BoardState {
         if (!item) {
             return this.fail('no_target', 'milk');
         }
-        const result = this.tryPlace(item, 'bag');
+        const depth = this.bags[col].length;
+        const result = this.tryPlace(item, 'bag', depth);
         if (result.ok) {
             this.bags[col].pop();
             this.retargetIfNeeded();
@@ -106,16 +108,24 @@ export class BoardState {
         return true;
     }
 
+    /** 胜负判定全关同一套；不按关卡号分支。 */
     failReason(): FailReason | null {
         if (this.isWin()) return null;
-        if (this.hasLegalMove()) return null;
-        if (this.bufferEnabled) {
-            for (let i = 0; i < this.buffer.length; i++) {
-                if (this.buffer[i] == null) return 'locked_out';
-            }
-            return 'buffer_full';
+        // 购物袋每列只剩 1 个时，场上没有隐藏层；此时若件数对不上空格，直接锁错。
+        if (this.allBagStacksAreSingle() && this.countsCannotPack()) return 'locked_out';
+        if (!this.hasLegalMove()) return this.closedFailReason();
+        return null;
+    }
+
+    /** 凑不满的格子。失败闪这些，而不是只闪已经封上的门。 */
+    unfillableTrayIndexes(): number[] {
+        const hits: number[] = [];
+        for (let i = 0; i < this.trays.length; i++) {
+            const tray = this.trays[i];
+            if (tray.sealed || tray.kind == null) continue;
+            if (this.supplyForTray(i) < tray.cap) hits.push(i);
         }
-        return 'locked_out';
+        return hits;
     }
 
     findHint(): HintPick | null {
@@ -125,7 +135,7 @@ export class BoardState {
             for (let c = 0; c < this.bags.length; c++) {
                 const item = this.peekBag(c);
                 if (!item) continue;
-                if (!this.canAccept(dests[d], item, 'bag').ok) continue;
+                if (!this.canAccept(dests[d], item, 'bag', this.bags[c].length).ok) continue;
                 let score = 0;
                 if (dests[d].kind === 'tray' && this.trays[dests[d].index].kind === item) score += 20;
                 if (this.dest && dests[d].kind === this.dest.kind && dests[d].index === this.dest.index) {
@@ -155,12 +165,109 @@ export class BoardState {
         return { dest: top.dest, bagCol: top.bagCol, bufferIndex: top.bufferIndex };
     }
 
+    /** 柜台已满或没有合法步时的失败分型。柜台还有空位时不是 buffer_full。 */
+    private closedFailReason(): FailReason {
+        if (this.bufferEnabled) {
+            for (let i = 0; i < this.buffer.length; i++) {
+                if (this.buffer[i] == null) return 'locked_out';
+            }
+            return 'buffer_full';
+        }
+        return 'locked_out';
+    }
+
+    /** 购物袋每列最多 1 个：没有下层可翻，才算「桌上都摊开了」。 */
+    private allBagStacksAreSingle(): boolean {
+        for (let i = 0; i < this.bags.length; i++) {
+            if (this.bags[i].length > 1) return false;
+        }
+        return true;
+    }
+
+    /**
+     * 已放进格子的食材必须能把该格装满；还在袋子和柜台里的，要能正好分进空格容量。
+     * 空格可以不用。凑不满就不可能收齐。
+     */
+    private countsCannotPack(): boolean {
+        const free: Partial<Record<FoodId, number>> = {};
+        const add = (kind: FoodId) => {
+            free[kind] = (free[kind] || 0) + 1;
+        };
+        for (let c = 0; c < this.bags.length; c++) {
+            for (let k = 0; k < this.bags[c].length; k++) add(this.bags[c][k]);
+        }
+        for (let i = 0; i < this.buffer.length; i++) {
+            const item = this.buffer[i];
+            if (item) add(item);
+        }
+        const emptyCaps: number[] = [];
+        for (let i = 0; i < this.trays.length; i++) {
+            const tray = this.trays[i];
+            if (tray.sealed) continue;
+            if (tray.kind == null || tray.items.length === 0) {
+                emptyCaps.push(tray.cap);
+                continue;
+            }
+            const have = (free[tray.kind] || 0) + tray.items.length;
+            if (have < tray.cap) return true;
+            const extra = have - tray.cap;
+            if (extra === 0) delete free[tray.kind];
+            else free[tray.kind] = extra;
+        }
+        const piles: number[] = [];
+        for (let i = 0; i < FOOD_IDS.length; i++) {
+            const n = free[FOOD_IDS[i]] || 0;
+            if (n > 0) piles.push(n);
+        }
+        piles.sort((a, b) => b - a);
+        return !this.packPiles(piles, emptyCaps);
+    }
+
+    /** 每种剩下的件数正好分成若干空格容量，格子不共用。 */
+    private packPiles(piles: number[], caps: number[]): boolean {
+        if (piles.length === 0) return true;
+        let capSum = 0;
+        for (let i = 0; i < caps.length; i++) capSum += caps[i];
+        let pileSum = 0;
+        for (let i = 0; i < piles.length; i++) pileSum += piles[i];
+        if (pileSum > capSum) return false;
+        const pile = piles[0];
+        const rest = piles.slice(1);
+        const n = caps.length;
+        const limit = 1 << n;
+        for (let mask = 1; mask < limit; mask++) {
+            let sum = 0;
+            for (let b = 0; b < n; b++) {
+                if (mask & (1 << b)) sum += caps[b];
+            }
+            if (sum !== pile) continue;
+            const next: number[] = [];
+            for (let b = 0; b < n; b++) {
+                if ((mask & (1 << b)) === 0) next.push(caps[b]);
+            }
+            if (this.packPiles(rest, next)) return true;
+        }
+        return false;
+    }
+
+    /** 能用来装满这一格的件数：格内已有的，加上袋子和柜台里同一种。别的格里的不算。 */
+    private supplyForTray(index: number): number {
+        const tray = this.trays[index];
+        if (tray.kind == null) return tray.items.length;
+        let n = tray.items.length;
+        for (let c = 0; c < this.bags.length; c++) {
+            for (let k = 0; k < this.bags[c].length; k++) if (this.bags[c][k] === tray.kind) n += 1;
+        }
+        for (let i = 0; i < this.buffer.length; i++) if (this.buffer[i] === tray.kind) n += 1;
+        return n;
+    }
+
     hasLegalMove(): boolean {
         const dests = this.allSelectableDests();
         const items = this.clickableItems();
         for (let d = 0; d < dests.length; d++) {
             for (let i = 0; i < items.length; i++) {
-                if (this.canAccept(dests[d], items[i].item, items[i].source).ok) return true;
+                if (this.canAccept(dests[d], items[i].item, items[i].source, items[i].bagDepth).ok) return true;
             }
         }
         return false;
@@ -170,6 +277,7 @@ export class BoardState {
         dest: Dest | null,
         item: FoodId,
         source: 'bag' | 'buffer',
+        bagDepth = 1,
     ): { ok: true } | { ok: false; reason: PlaceReason } {
         if (!dest) return { ok: false, reason: 'no_target' };
         if (dest.kind === 'buffer') {
@@ -191,11 +299,24 @@ export class BoardState {
         return { ok: true };
     }
 
-    private tryPlace(item: FoodId, source: 'bag' | 'buffer'): PlaceResult {
-        const check = this.canAccept(this.dest, item, source);
+    /** 冰箱里没有任何一格能收这件。有空格或同种未满格时不算。 */
+    private noFridgeAccepts(item: FoodId, source: 'bag' | 'buffer', bagDepth: number): boolean {
+        for (let i = 0; i < this.trays.length; i++) {
+            if (this.canAccept({ kind: 'tray', index: i }, item, source, bagDepth).ok) return false;
+        }
+        return true;
+    }
+
+    private tryPlace(item: FoodId, source: 'bag' | 'buffer', bagDepth = 1): PlaceResult {
+        const check = this.canAccept(this.dest, item, source, bagDepth);
         if (!check.ok) {
             if (check.reason === 'dest_full') this.retargetIfNeeded();
-            return this.fail(check.reason, item);
+            if (source === 'bag' && this.bufferEnabled && this.noFridgeAccepts(item, source, bagDepth)) {
+                for (let i = 0; i < this.buffer.length; i++) {
+                    if (this.buffer[i] == null) return this.fail('need_buffer', item, bagDepth);
+                }
+            }
+            return this.fail(check.reason, item, bagDepth);
         }
         const dest = this.dest;
         if (!dest) return this.fail('no_target', item);
@@ -215,15 +336,21 @@ export class BoardState {
         return { ok: true, item, dest, sealed, steps: this.steps };
     }
 
-    private fail(reason: PlaceReason, item: FoodId): PlaceResult {
-        return { ok: false, reason, item, hintTrays: this.hintTrays(reason, item), hintBuffers: this.hintBuffers(reason, item) };
+    private fail(reason: PlaceReason, item: FoodId, bagDepth = 1): PlaceResult {
+        return {
+            ok: false,
+            reason,
+            item,
+            hintTrays: this.hintTrays(reason, item, bagDepth),
+            hintBuffers: this.hintBuffers(reason, item),
+        };
     }
 
-    private hintTrays(reason: PlaceReason, item: FoodId): number[] {
-        if (reason === 'wrong_kind' || reason === 'anti_split') {
+    private hintTrays(reason: PlaceReason, item: FoodId, bagDepth = 1): number[] {
+        if (reason === 'wrong_kind' || reason === 'anti_split' || reason === 'need_buffer') {
             const hits: number[] = [];
             for (let i = 0; i < this.trays.length; i++) {
-                if (this.canAccept({ kind: 'tray', index: i }, item, 'bag').ok) hits.push(i);
+                if (this.canAccept({ kind: 'tray', index: i }, item, 'bag', bagDepth).ok) hits.push(i);
             }
             return hits;
         }
@@ -236,7 +363,7 @@ export class BoardState {
 
     private hintBuffers(reason: PlaceReason, item: FoodId): number[] {
         if (!this.bufferEnabled) return [];
-        if (reason !== 'wrong_kind' && reason !== 'anti_split') return [];
+        if (reason !== 'wrong_kind' && reason !== 'anti_split' && reason !== 'need_buffer') return [];
         const hits: number[] = [];
         for (let i = 0; i < this.buffer.length; i++) {
             if (this.canAccept({ kind: 'buffer', index: i }, item, 'bag').ok) hits.push(i);
@@ -314,16 +441,16 @@ export class BoardState {
         return dests;
     }
 
-    private clickableItems(): { item: FoodId; source: 'bag' | 'buffer' }[] {
-        const items: { item: FoodId; source: 'bag' | 'buffer' }[] = [];
+    private clickableItems(): { item: FoodId; source: 'bag' | 'buffer'; bagDepth: number }[] {
+        const items: { item: FoodId; source: 'bag' | 'buffer'; bagDepth: number }[] = [];
         for (let c = 0; c < this.bags.length; c++) {
             const top = this.peekBag(c);
-            if (top) items.push({ item: top, source: 'bag' });
+            if (top) items.push({ item: top, source: 'bag', bagDepth: this.bags[c].length });
         }
         if (this.bufferEnabled) {
             for (let i = 0; i < this.buffer.length; i++) {
                 const v = this.buffer[i];
-                if (v != null) items.push({ item: v, source: 'buffer' });
+                if (v != null) items.push({ item: v, source: 'buffer', bagDepth: 1 });
             }
         }
         return items;

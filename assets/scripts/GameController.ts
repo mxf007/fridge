@@ -1,5 +1,5 @@
 /**
- * 对局视图：把点击译成 selectTray / placeFromBag。不写规则。
+ * 对局视图：短按译成 selectTray / placeFromBag；拖动松手才改目标并落子。不写规则。
  * 第 1 关：竖槽 + 牛奶托盘列。飞入 220ms，封格关门 280ms，胜利再延迟。
  */
 import {
@@ -21,6 +21,7 @@ import {
     Vec3,
     easing,
     sys,
+    Tween,
     tween,
     view,
 } from 'cc';
@@ -57,6 +58,7 @@ import { LEVEL_28 } from './game/level_28';
 import { LEVEL_29 } from './game/level_29';
 import { LEVEL_30 } from './game/level_30';
 import { albumStatusLine, noteAlbumWin, prepareAlbum, visibleAlbumGrade, winStepLine } from './game/AlbumState';
+import { playSfx } from './game/Sfx';
 import type { AlbumGrade } from './game/AlbumState';
 import type { AlbumEntry } from './game/AlbumState';
 import type { Dest, FailReason, FoodId, HintPick, LevelDef, PlaceFail, PlaceReason } from './game/types';
@@ -169,6 +171,27 @@ const MILESTONE_NS = [10, 20, 30];
 const ALBUM_LONG_PRESS_MS = 500;
 /** 位移超过这个值才当滑动，取消点按和长按。 */
 const ALBUM_SCROLL_SLOP = 14;
+/** 食材位移超过这个值才从点选变成拖动。 */
+const DRAG_SLOP = 14;
+
+type FoodDragSource = { kind: 'bag'; col: number } | { kind: 'buffer'; index: number };
+
+type FoodPress = {
+    id: number;
+    source: FoodDragSource;
+    item: FoodId;
+    startX: number;
+    startY: number;
+    origin: Vec3;
+    armed: boolean;
+    ghost: Node | null;
+    flyer: Node | null;
+    hidden: Node | null;
+    hover: Dest | null;
+    hit: Dest | null;
+    flyW: number;
+    flyH: number;
+};
 
 const TOAST: Record<PlaceReason, string> = {
     wrong_kind: '这格只收牛奶',
@@ -274,6 +297,14 @@ export class GameController extends Component {
     private l1Guide = false;
     /** 开局锁定的购物袋前后排；null = 一排。整关不随翻层重排。 */
     private bagRowPlan: { front: number[]; back: number[] } | null = null;
+    /** 按下食材后、松手前。超过 DRAG_SLOP 才 armed。 */
+    private foodPress: FoodPress | null = null;
+    /** 换关或清手势时递增，丢掉还在飞的拖动回调。 */
+    private foodPressToken = 0;
+    /** 这次触摸已经当成拖动或短按处理过，父节点不要再落子。 */
+    private swallowedTouch = -2;
+    private dropHalo: Node | null = null;
+    private dropHaloDest: Dest | null = null;
     /** 通关刚跨过 10/20/30，回主页弹一次里程碑卡。 */
     private pendingMilestone: number | null = null;
     /** 第 1 关画面用到的图。齐了才进关。 */
@@ -1093,6 +1124,7 @@ export class GameController extends Component {
 
     private presentLevel(level: LevelDef) {
         this.unscheduleAllCallbacks();
+        this.clearFoodPress();
         for (let i = 0; i < HOME_NODES.length; i++) {
             const n = this.node.getChildByName(HOME_NODES[i]);
             if (n) n.active = false;
@@ -2411,9 +2443,18 @@ export class GameController extends Component {
                 tween(tileNode).to(0.18, { position: new Vec3(0, y, 0) }, { easing: easing.cubicOut }).start();
                 tween(op).to(0.18, { opacity: 255 }).start();
             }
-            const tap = () => this.onBagTap(c, true);
-            tileNode.on(Node.EventType.TOUCH_END, tap, this);
-            foodNode.on(Node.EventType.TOUCH_END, tap, this);
+            const src: FoodDragSource = { kind: 'bag', col: c };
+            const down = (e: EventTouch) => this.beginFoodPointer(e, src);
+            const move = (e: EventTouch) => this.moveFoodPointer(e);
+            const up = (e: EventTouch) => this.endFoodPointer(e);
+            tileNode.on(Node.EventType.TOUCH_START, down, this);
+            tileNode.on(Node.EventType.TOUCH_MOVE, move, this);
+            tileNode.on(Node.EventType.TOUCH_END, up, this);
+            tileNode.on(Node.EventType.TOUCH_CANCEL, up, this);
+            foodNode.on(Node.EventType.TOUCH_START, down, this);
+            foodNode.on(Node.EventType.TOUCH_MOVE, move, this);
+            foodNode.on(Node.EventType.TOUCH_END, up, this);
+            foodNode.on(Node.EventType.TOUCH_CANCEL, up, this);
             if (this.holdHint && this.holdHint.bagCol === c) {
                 this.drawSageDashedRing(foodNode, foodSize.w + 12, foodSize.h + 12, 18, 'HintRing');
             }
@@ -2604,7 +2645,12 @@ export class GameController extends Component {
 
             const item = board.buffer[i];
             if (item) {
-                this.addSprite(slotNode, 'Food', this.frameForFood(item), BUF_FOOD, BUF_FOOD, 0, 0, Color.WHITE);
+                const food = this.addSprite(slotNode, 'Food', this.frameForFood(item), BUF_FOOD, BUF_FOOD, 0, 0, Color.WHITE);
+                const src: FoodDragSource = { kind: 'buffer', index: i };
+                food.on(Node.EventType.TOUCH_START, (e: EventTouch) => this.beginFoodPointer(e, src), this);
+                food.on(Node.EventType.TOUCH_MOVE, (e: EventTouch) => this.moveFoodPointer(e), this);
+                food.on(Node.EventType.TOUCH_END, (e: EventTouch) => this.endFoodPointer(e), this);
+                food.on(Node.EventType.TOUCH_CANCEL, (e: EventTouch) => this.endFoodPointer(e), this);
                 if (this.holdHint && this.holdHint.bufferIndex === i) {
                     this.drawSageDashedRing(slotNode, BUF_FOOD + 8, BUF_FOOD + 8, 18, 'HintRing');
                 }
@@ -2620,9 +2666,15 @@ export class GameController extends Component {
                 this.drawSageDashedRing(slotNode, BUF_SLOT_W, BUF_SLOT_H, 28, 'HintRing');
             }
 
-            slotNode.on(Node.EventType.TOUCH_END, () => {
-                this.onBufferTap(i);
+            const slotIndex = i;
+            slotNode.on(Node.EventType.TOUCH_START, (e: EventTouch) => {
+                const live = this.board;
+                if (!live || live.buffer[slotIndex] == null) return;
+                this.beginFoodPointer(e, { kind: 'buffer', index: slotIndex });
             }, this);
+            slotNode.on(Node.EventType.TOUCH_MOVE, (e: EventTouch) => this.moveFoodPointer(e), this);
+            slotNode.on(Node.EventType.TOUCH_END, (e: EventTouch) => this.endBufferPointer(e, slotIndex), this);
+            slotNode.on(Node.EventType.TOUCH_CANCEL, (e: EventTouch) => this.endBufferPointer(e, slotIndex), this);
         }
 
         this.addLabel(plaque, 'BufCount', `柜台 ${filled}/${n}`, 28, MILK, 260, 40);
@@ -2680,6 +2732,411 @@ export class GameController extends Component {
         return rgb ? new Color(rgb[0], rgb[1], rgb[2], 255) : Color.WHITE;
     }
 
+    private clearFoodPress() {
+        this.foodPressToken += 1;
+        const press = this.foodPress;
+        this.foodPress = null;
+        this.clearDropHalo();
+        if (!press) return;
+        if (press.ghost && press.ghost.isValid) press.ghost.destroy();
+        if (press.hidden && press.hidden.isValid) this.showDragSource(press.hidden);
+    }
+
+    private beginFoodPointer(e: EventTouch, source: FoodDragSource) {
+        if (this.foodPress) {
+            if (this.foodPress.id === e.getID()) e.propagationStopped = true;
+            return;
+        }
+        const board = this.board;
+        const root = this.playRoot;
+        if (!board || !root || this.busy || board.isWin()) return;
+        let item: FoodId | null = null;
+        if (source.kind === 'bag') {
+            if (this.lockedBagCol === source.col) return;
+            item = board.peekBag(source.col);
+        } else {
+            if (!board.bufferEnabled) return;
+            item = board.buffer[source.index];
+        }
+        if (!item) return;
+        const food = this.sourceFoodNode(source);
+        const rootUi = root.getComponent(UITransform);
+        const origin = food && rootUi
+            ? rootUi.convertToNodeSpaceAR(food.worldPosition.clone())
+            : new Vec3();
+        const p = e.getUILocation();
+        this.foodPress = {
+            id: e.getID(),
+            source,
+            item,
+            startX: p.x,
+            startY: p.y,
+            origin,
+            armed: false,
+            ghost: null,
+            flyer: null,
+            hidden: null,
+            hover: null,
+            hit: null,
+            flyW: 72,
+            flyH: 96,
+        };
+        e.propagationStopped = true;
+    }
+
+    private moveFoodPointer(e: EventTouch) {
+        const press = this.foodPress;
+        if (!press || press.id !== e.getID()) return;
+        e.propagationStopped = true;
+        const p = e.getUILocation();
+        const dx = p.x - press.startX;
+        const dy = p.y - press.startY;
+        if (!press.armed) {
+            if (dx * dx + dy * dy < DRAG_SLOP * DRAG_SLOP) return;
+            this.dismissSizeIntro();
+            this.armFoodPress(press);
+        }
+        if (this.foodPress !== press || !press.ghost) return;
+        const finger = this.fingerInRoot(e);
+        if (!finger) return;
+        press.ghost.setPosition(finger.x, finger.y, 0);
+        const hit = this.destAtTouch(e);
+        press.hit = hit;
+        const hover = hit && this.dragCanDrop(press, hit) ? hit : null;
+        press.hover = hover;
+        if (hover) this.showDropHalo(hover);
+        else this.clearDropHalo();
+    }
+
+    private endFoodPointer(e: EventTouch) {
+        const press = this.foodPress;
+        if (!press || press.id !== e.getID()) return;
+        e.propagationStopped = true;
+        this.swallowedTouch = e.getID();
+        this.foodPress = null;
+        this.clearDropHalo();
+        if (!press.armed) {
+            if (press.source.kind === 'bag') this.onBagTap(press.source.col, true);
+            else this.placeFromBuffer(press.source.index);
+            return;
+        }
+        if (press.hover) {
+            this.flyGhostToDest(press, press.hover);
+            return;
+        }
+        this.snapGhostHome(press, press.hit);
+    }
+
+    private endBufferPointer(e: EventTouch, index: number) {
+        if (this.foodPress && this.foodPress.id === e.getID()) {
+            this.endFoodPointer(e);
+            return;
+        }
+        if (this.swallowedTouch === e.getID()) return;
+        this.onBufferTap(index);
+    }
+
+    private armFoodPress(press: FoodPress) {
+        const root = this.playRoot;
+        if (!root) return;
+        press.armed = true;
+        this.busy = true;
+        playSfx('pickup');
+        const hidden = this.sourceFoodNode(press.source);
+        press.hidden = hidden;
+        let flyW = 72;
+        let flyH = 96;
+        if (hidden) {
+            const ui = hidden.getComponent(UITransform);
+            const sc = hidden.worldScale;
+            if (ui) {
+                flyW = Math.max(8, ui.contentSize.width * Math.abs(sc.x));
+                flyH = Math.max(8, ui.contentSize.height * Math.abs(sc.y));
+            }
+            const rootUi = root.getComponent(UITransform);
+            if (rootUi) press.origin = rootUi.convertToNodeSpaceAR(hidden.worldPosition.clone());
+            // 不能 active=false：触摸目标一关掉，这次拖动会被系统取消。
+            this.hideDragSource(hidden);
+        }
+        press.flyW = flyW;
+        press.flyH = flyH;
+        const ghost = new Node('DragGhost');
+        ghost.layer = UI_2D;
+        ghost.setPosition(press.origin);
+        root.addChild(ghost);
+        this.placeBelowHud(ghost);
+        const shadow = new Node('Shadow');
+        shadow.layer = UI_2D;
+        shadow.setPosition(0, -flyH * 0.42, 0);
+        shadow.addComponent(UITransform).setContentSize(flyW, 16);
+        const shade = shadow.addComponent(Graphics);
+        shade.fillColor = new Color(72, 54, 42, 140);
+        shade.ellipse(0, 0, flyW * 0.36, 5);
+        shade.fill();
+        ghost.addChild(shadow);
+        const flyer = this.addSprite(ghost, 'Flyer', this.frameForFood(press.item), flyW, flyH, 0, 0, Color.WHITE);
+        const flyerUi = flyer.getComponent(UITransform);
+        if (flyerUi) flyerUi.setAnchorPoint(0.5, 0.5);
+        press.flyer = flyer;
+        press.ghost = ghost;
+    }
+
+    private flyGhostToDest(press: FoodPress, dest: Dest) {
+        const board = this.board;
+        if (board) {
+            if (dest.kind === 'tray') board.selectTray(dest.index);
+            else board.selectBuffer(dest.index);
+        }
+        const ghost = press.ghost;
+        const flyer = press.flyer;
+        const token = this.foodPressToken;
+        const landing = this.placeLanding(press.item, dest, press.flyW, press.flyH);
+        const finish = () => {
+            if (token !== this.foodPressToken) return;
+            if (ghost && ghost.isValid) ghost.destroy();
+            if (press.source.kind === 'bag') this.commitPlace(press.source.col);
+            else this.commitPlaceFromBuffer(press.source.index);
+        };
+        if (!ghost || !flyer || !landing) {
+            finish();
+            return;
+        }
+        tween(ghost)
+            .to(FLY_SEC, { position: landing.to }, { easing: easing.cubicOut })
+            .start();
+        tween(flyer)
+            .to(FLY_SEC, { scale: landing.scale }, { easing: easing.linear })
+            .call(finish)
+            .start();
+    }
+
+    private snapGhostHome(press: FoodPress, hit: Dest | null) {
+        playSfx('reject');
+        const ghost = press.ghost;
+        const hidden = press.hidden;
+        const token = this.foodPressToken;
+        const back = () => {
+            if (token !== this.foodPressToken) return;
+            if (ghost && ghost.isValid) ghost.destroy();
+            if (hidden && hidden.isValid) this.showDragSource(hidden);
+            this.busy = false;
+            const board = this.board;
+            if (!hit || !board) return;
+            const source = press.source.kind === 'bag' ? 'bag' : 'buffer';
+            const depth = press.source.kind === 'bag' ? board.bags[press.source.col].length : 1;
+            this.showPlaceFail(board.explainReject(hit, press.item, source, depth));
+            if (press.source.kind === 'bag') this.shakeBagTop(press.source.col);
+        };
+        if (!ghost) {
+            back();
+            return;
+        }
+        tween(ghost)
+            .to(0.12, { position: press.origin }, { easing: easing.quadOut })
+            .call(back)
+            .start();
+    }
+
+    private dragCanDrop(press: FoodPress, dest: Dest): boolean {
+        const board = this.board;
+        if (!board) return false;
+        const source = press.source.kind === 'bag' ? 'bag' : 'buffer';
+        const depth = press.source.kind === 'bag' ? board.bags[press.source.col].length : 1;
+        return board.canAccept(dest, press.item, source, depth).ok;
+    }
+
+    private sourceFoodNode(source: FoodDragSource): Node | null {
+        const root = this.playRoot;
+        const board = this.board;
+        if (!root || !board) return null;
+        if (source.kind === 'bag') {
+            const bag = root.getChildByName(`Bag${source.col}`);
+            if (!bag) return null;
+            const top = bag.getChildByName(`T${board.bags[source.col].length - 1}`);
+            if (!top) return null;
+            return top.getChildByName('Food') || top;
+        }
+        const wrap = root.getChildByName('BufferBoard');
+        const slot = wrap ? wrap.getChildByName(`Buffer${source.index}`) : null;
+        return slot ? slot.getChildByName('Food') : null;
+    }
+
+    /** 指尖在对局根节点里的位置。拖动时食物贴图中心放在这里。 */
+    private fingerInRoot(e: EventTouch): Vec3 | null {
+        const root = this.playRoot;
+        const ui = root ? root.getComponent(UITransform) : null;
+        if (!ui) return null;
+        const p = e.getUILocation();
+        return ui.convertToNodeSpaceAR(new Vec3(p.x, p.y, 0));
+    }
+
+    /** 只把贴图藏起来。关掉节点或中途加组件都会让这次触摸被取消。 */
+    private hideDragSource(node: Node) {
+        const sp = node.getComponent(Sprite);
+        if (!sp) return;
+        const c = sp.color;
+        sp.color = new Color(c.r, c.g, c.b, 0);
+    }
+
+    private showDragSource(node: Node) {
+        node.active = true;
+        const sp = node.getComponent(Sprite);
+        if (!sp) return;
+        const c = sp.color;
+        sp.color = new Color(c.r, c.g, c.b, 255);
+    }
+
+    /** 先柜台、后冰箱。后画的格子盖在上面，从后往前测。 */
+    private destAtTouch(e: EventTouch): Dest | null {
+        const root = this.playRoot;
+        const board = this.board;
+        if (!root || !board) return null;
+        const screen = e.getLocation();
+        if (board.bufferEnabled) {
+            const wrap = root.getChildByName('BufferBoard');
+            if (wrap) {
+                for (let i = board.buffer.length - 1; i >= 0; i--) {
+                    const slot = wrap.getChildByName(`Buffer${i}`);
+                    const ui = slot ? slot.getComponent(UITransform) : null;
+                    if (ui && ui.hitTest(screen)) return { kind: 'buffer', index: i };
+                }
+            }
+        }
+        for (let i = board.trays.length - 1; i >= 0; i--) {
+            const tray = this.newestNamed(root, `Tray${i}`);
+            const ui = tray ? tray.getComponent(UITransform) : null;
+            if (ui && ui.hitTest(screen)) return { kind: 'tray', index: i };
+        }
+        return null;
+    }
+
+    /** 和选中呼吸灯同一圈：冰箱用木框外沿，柜台用凹槽外沿。 */
+    private dropHaloBox(dest: Dest): { w: number; h: number; inset: number; radius: number } {
+        if (dest.kind === 'buffer') {
+            return { w: BUF_SLOT_W + 4, h: BUF_SLOT_H + 4, inset: 2, radius: 32 };
+        }
+        const m = this.trayAt(dest.index);
+        return { w: m.outerW, h: m.outerH, inset: 4, radius: m.horizontal ? 16 : 24 };
+    }
+
+    private showDropHalo(dest: Dest) {
+        if (this.dropHalo && this.dropHalo.isValid && this.sameDest(this.dropHaloDest, dest)) return;
+        this.clearDropHalo();
+        const root = this.playRoot;
+        const host = this.destNode(dest);
+        const ui = host ? host.getComponent(UITransform) : null;
+        const rootUi = root ? root.getComponent(UITransform) : null;
+        if (!root || !host || !ui || !rootUi) return;
+        const box = this.dropHaloBox(dest);
+        const halo = new Node('DropHalo');
+        halo.layer = UI_2D;
+        const pos = rootUi.convertToNodeSpaceAR(ui.convertToWorldSpaceAR(new Vec3(0, 0, 0)));
+        halo.setPosition(pos);
+        halo.addComponent(UITransform).setContentSize(box.w + 24, box.h + 24);
+        const g = halo.addComponent(Graphics);
+        const x = -box.w / 2 + box.inset;
+        const y = -box.h / 2 + box.inset;
+        const rw = box.w - box.inset * 2;
+        const rh = box.h - box.inset * 2;
+        g.lineWidth = 16;
+        g.strokeColor = new Color(255, 138, 18, 230);
+        g.roundRect(x - 10, y - 10, rw + 20, rh + 20, box.radius + 8);
+        g.stroke();
+        g.lineWidth = 6;
+        g.strokeColor = new Color(255, 226, 48, 255);
+        g.roundRect(x - 2, y - 2, rw + 4, rh + 4, box.radius + 2);
+        g.stroke();
+        const op = halo.addComponent(UIOpacity);
+        op.opacity = 255;
+        root.addChild(halo);
+        this.raiseDropHalo(halo);
+        tween(op)
+            .to(0.3, { opacity: 210 })
+            .to(0.3, { opacity: 255 })
+            .union()
+            .repeatForever()
+            .start();
+        this.dropHalo = halo;
+        this.dropHaloDest = dest;
+    }
+
+    /** 外框盖过台面和格子，仍留在拖动的食材下面。 */
+    private raiseDropHalo(node: Node) {
+        const root = this.playRoot;
+        if (!root || node.parent !== root) return;
+        const ghost = root.getChildByName('DragGhost');
+        if (ghost && ghost !== node) {
+            node.setSiblingIndex(ghost.getSiblingIndex());
+            return;
+        }
+        this.placeBelowHud(node);
+    }
+
+    private clearDropHalo() {
+        const halo = this.dropHalo;
+        if (halo && halo.isValid) {
+            const op = halo.getComponent(UIOpacity);
+            if (op) Tween.stopAllByTarget(op);
+            halo.destroy();
+        }
+        this.dropHalo = null;
+        this.dropHaloDest = null;
+    }
+
+    private sameDest(a: Dest | null, b: Dest | null): boolean {
+        if (!a || !b) return false;
+        return a.kind === b.kind && a.index === b.index;
+    }
+
+    private destNode(dest: Dest): Node | null {
+        const root = this.playRoot;
+        if (!root) return null;
+        if (dest.kind === 'tray') return this.newestNamed(root, `Tray${dest.index}`);
+        const wrap = root.getChildByName('BufferBoard');
+        return wrap ? wrap.getChildByName(`Buffer${dest.index}`) : null;
+    }
+
+    private newestNamed(root: Node, name: string): Node | null {
+        const kids = root.children;
+        for (let i = kids.length - 1; i >= 0; i--) {
+            if (kids[i].name === name) return kids[i];
+        }
+        return null;
+    }
+
+    /** 飞入落点。scale 乘上飞行图的宽高后等于格子里的成品尺寸。 */
+    private placeLanding(item: FoodId, dest: Dest, flyW: number, flyH: number): { to: Vec3; scale: Vec3 } | null {
+        const board = this.board;
+        const root = this.playRoot;
+        const ui = root ? root.getComponent(UITransform) : null;
+        if (!board || !root || !ui || flyW <= 0 || flyH <= 0) return null;
+        if (dest.kind === 'buffer') {
+            const wrap = root.getChildByName('BufferBoard');
+            const slot = wrap ? wrap.getChildByName(`Buffer${dest.index}`) : null;
+            const slotUi = slot ? slot.getComponent(UITransform) : null;
+            if (!slotUi) return null;
+            const to = ui.convertToNodeSpaceAR(slotUi.convertToWorldSpaceAR(new Vec3(0, 0, 0)));
+            return { to, scale: new Vec3(BUF_FOOD / flyW, BUF_FOOD / flyH, 1) };
+        }
+        const trayNode = this.newestNamed(root, `Tray${dest.index}`);
+        const trayUi = trayNode ? trayNode.getComponent(UITransform) : null;
+        const tray = board.trays[dest.index];
+        if (!trayUi || !tray) return null;
+        const m = this.trayAt(dest.index);
+        const seat = this.seatBox(m.slotW, m.slotH, tray.cap, tray.items.length, m.horizontal);
+        const to = ui.convertToNodeSpaceAR(trayUi.convertToWorldSpaceAR(new Vec3(seat.x, seat.y, 0)));
+        const size = this.trayItemDrawSize(item, m.horizontal, seat);
+        return { to, scale: new Vec3(size.w / flyW, size.h / flyH, 1) };
+    }
+
+    private placeBelowHud(node: Node) {
+        const root = this.playRoot;
+        if (!root || node.parent !== root) return;
+        const hud = root.getChildByName('LevelPill');
+        if (!hud) return;
+        node.setSiblingIndex(hud.getSiblingIndex());
+    }
+
     private onBagTap(col: number, isTop: boolean) {
         const board = this.board;
         const root = this.playRoot;
@@ -2712,51 +3169,27 @@ export class GameController extends Component {
         else foodNode.active = false;
         const ui = root.getComponent(UITransform)!;
         const from = ui.convertToNodeSpaceAR(fromWorld);
-        let to = new Vec3(from.x, from.y, 0);
-        let land = new Vec3(1, 1, 1);
-        let flyFrame = this.frameForFood(item);
-        let flyW = 72;
-        let flyH = 96;
-        if (board.dest && board.dest.kind === 'buffer') {
-            const wrap = root.getChildByName('BufferBoard');
-            const slot = wrap ? wrap.getChildByName(`Buffer${board.dest.index}`) : null;
-            if (!slot) {
-                this.commitPlace(col);
-                return;
-            }
-            const toWorld = slot.getComponent(UITransform)!.convertToWorldSpaceAR(new Vec3(0, 0, 0));
-            to = ui.convertToNodeSpaceAR(toWorld);
-            flyFrame = this.frameForFood(item);
+        const fromUi = fromNode.getComponent(UITransform);
+        const fromScale = fromNode.worldScale;
+        let flyW = fromUi ? fromUi.contentSize.width * Math.abs(fromScale.x) : 72;
+        let flyH = fromUi ? fromUi.contentSize.height * Math.abs(fromScale.y) : 96;
+        if (toBuffer) {
             flyW = 96;
             flyH = 96;
-            land = new Vec3(BUF_FOOD / 96, BUF_FOOD / 96, 1);
-        } else {
-            const destIndex = board.dest && board.dest.kind === 'tray' ? board.dest.index : 0;
-            const trayNode = root.getChildByName(`Tray${destIndex}`);
-            if (!trayNode) {
-                this.commitPlace(col);
-                return;
-            }
-            const nextCount = board.trays[destIndex].items.length;
-            const m = this.trayAt(destIndex);
-            const cap = board.trays[destIndex].cap;
-            const seat = this.seatBox(m.slotW, m.slotH, cap, nextCount, m.horizontal);
-            const toWorld = trayNode.getComponent(UITransform)!.convertToWorldSpaceAR(new Vec3(seat.x, seat.y, 0));
-            to = ui.convertToNodeSpaceAR(toWorld);
-            const fromUi = fromNode.getComponent(UITransform);
-            const fromScale = fromNode.worldScale;
-            flyW = fromUi ? fromUi.contentSize.width * fromScale.x : flyW;
-            flyH = fromUi ? fromUi.contentSize.height * fromScale.y : flyH;
-            const size = this.trayItemDrawSize(item, m.horizontal, seat);
-            land = new Vec3(size.w / flyW, size.h / flyH, 1);
+        }
+        const landing = board.dest ? this.placeLanding(item, board.dest, flyW, flyH) : null;
+        if (!landing) {
+            this.commitPlace(col);
+            return;
         }
 
-        const flyer = this.addSprite(root, 'Flyer', flyFrame, flyW, flyH, from.x, from.y, Color.WHITE);
+        const flyer = this.addSprite(root, 'Flyer', this.frameForFood(item), flyW, flyH, from.x, from.y, Color.WHITE);
+        this.placeBelowHud(flyer);
         tween(flyer)
-            .to(FLY_SEC, { position: new Vec3(to.x, to.y, 0) }, { easing: easing.cubicOut })
+            .to(FLY_SEC, { position: landing.to }, { easing: easing.cubicOut })
             .start();
         tween(flyer)
-            .to(FLY_SEC, { scale: land }, { easing: easing.linear })
+            .to(FLY_SEC, { scale: landing.scale }, { easing: easing.linear })
             .start();
 
         this.scheduleOnce(() => {
@@ -2799,6 +3232,7 @@ export class GameController extends Component {
         const toWorld = trayNode.getComponent(UITransform)!.convertToWorldSpaceAR(new Vec3(seat.x, seat.y, 0));
         const to = ui.convertToNodeSpaceAR(toWorld);
         const flyer = this.addSprite(root, 'Flyer', this.frameForFood(item), 64, 96, from.x, from.y, Color.WHITE);
+        this.placeBelowHud(flyer);
         const fitted = this.trayFoodSize(m.slotH, board.trays[destIndex].cap);
         const size = m.horizontal && item === 'milk' ? this.plateFoodSize('milk') : fitted;
         const land = new Vec3(size.w / 64, size.h / 96, 1);
@@ -2834,10 +3268,14 @@ export class GameController extends Component {
         this.animateDoorIndex = result.sealed && result.dest.kind === 'tray' ? result.dest.index : null;
         this.holdWin = win;
         this.render();
-        if (result.sealed && result.dest.kind === 'tray' && this.playDoorClose(result.dest.index, win)) return;
-        this.animateDoorIndex = null;
-        this.render();
-        this.finishMove(win);
+        playSfx('place');
+        const doorPlayed = result.sealed && result.dest.kind === 'tray' && this.playDoorClose(result.dest.index, win);
+        if (!doorPlayed) {
+            this.animateDoorIndex = null;
+            this.render();
+        }
+        this.squashLanded(result.dest);
+        if (!doorPlayed) this.finishMove(win);
     }
 
     private commitPlace(col: number) {
@@ -2872,36 +3310,122 @@ export class GameController extends Component {
         this.animateDoorIndex = result.sealed && result.dest.kind === 'tray' ? result.dest.index : null;
         this.holdWin = win;
         this.render();
-        if (result.sealed && result.dest.kind === 'tray' && this.playDoorClose(result.dest.index, win)) return;
-        this.animateDoorIndex = null;
-        this.render();
-        this.finishMove(win);
+        playSfx('place');
+        const doorPlayed = result.sealed && result.dest.kind === 'tray' && this.playDoorClose(result.dest.index, win);
+        if (!doorPlayed) {
+            this.animateDoorIndex = null;
+            this.render();
+        }
+        this.squashLanded(result.dest);
+        if (!doorPlayed) this.finishMove(win);
     }
 
     /** render() 延迟销毁旧节点，getChildByName 会命中即将销毁的旧槽，门动画挂上去就丢了。 */
     private playDoorClose(index: number, win: boolean): boolean {
         const root = this.playRoot;
         if (!root) return false;
-        const name = `Tray${index}`;
-        let tray: Node | null = null;
-        const kids = root.children;
-        for (let i = kids.length - 1; i >= 0; i--) {
-            if (kids[i].name === name) {
-                tray = kids[i];
-                break;
-            }
-        }
+        const tray = this.newestNamed(root, `Tray${index}`);
         const door = tray ? tray.getChildByName('Door') : null;
-        if (!door || !tray) return false;
+        const doorUi = door ? door.getComponent(UITransform) : null;
+        if (!door || !tray || !doorUi) return false;
+        const slotW = doorUi.contentSize.width;
+        const slotH = doorUi.contentSize.height;
+        playSfx('door');
+        tween(door)
+            .delay(DOOR_SEC * 0.8)
+            .call(() => {
+                if (door.isValid) this.spawnHingeGlint(door, slotH);
+            })
+            .start();
         tween(door)
             .to(DOOR_SEC, { scale: new Vec3(1, 1, 1) }, { easing: easing.cubicOut })
             .call(() => {
                 this.animateDoorIndex = null;
+                if (door.isValid) {
+                    playSfx('latch');
+                    this.spawnSeamPuff(door, slotW, slotH);
+                }
                 this.bounceNode(tray);
                 this.finishMove(win);
             })
             .start();
         return true;
+    }
+
+    /** 门合到约八成时，右缘把手上一条短白高光。 */
+    private spawnHingeGlint(door: Node, slotH: number) {
+        const handleH = Math.min(72, Math.max(28, Math.round(slotH * 0.46)));
+        const glintH = Math.round(handleH * 0.55);
+        const glint = new Node('HingeGlint');
+        glint.layer = UI_2D;
+        glint.setPosition(-15, 0, 0);
+        glint.addComponent(UITransform).setContentSize(6, glintH);
+        const g = glint.addComponent(Graphics);
+        g.fillColor = new Color(255, 255, 255, 230);
+        g.roundRect(-3, -glintH / 2, 6, glintH, 3);
+        g.fill();
+        const op = glint.addComponent(UIOpacity);
+        op.opacity = 255;
+        door.addChild(glint);
+        tween(op)
+            .to(0.08, { opacity: 0 })
+            .call(() => {
+                if (glint.isValid) glint.destroy();
+            })
+            .start();
+    }
+
+    /** 门到位时，左缘三粒奶油圆点向外淡出。 */
+    private spawnSeamPuff(door: Node, slotW: number, slotH: number) {
+        const ys = [-slotH * 0.22, 0, slotH * 0.22];
+        for (let i = 0; i < ys.length; i++) {
+            const dot = new Node('SeamPuff');
+            dot.layer = UI_2D;
+            const x0 = -slotW - 2;
+            dot.setPosition(x0, ys[i], 0);
+            dot.addComponent(UITransform).setContentSize(16, 16);
+            const g = dot.addComponent(Graphics);
+            const radius = 4 + i;
+            g.fillColor = new Color(246, 239, 230, 210);
+            g.circle(0, 0, radius);
+            g.fill();
+            const op = dot.addComponent(UIOpacity);
+            op.opacity = 220;
+            door.addChild(dot);
+            tween(dot)
+                .to(0.12, { position: new Vec3(x0 - 16 - i * 6, ys[i], 0) }, { easing: easing.quadOut })
+                .start();
+            tween(op)
+                .to(0.12, { opacity: 0 })
+                .call(() => {
+                    if (dot.isValid) dot.destroy();
+                })
+                .start();
+        }
+    }
+
+    /** 食材落进格子后纵向轻压再弹回。 */
+    private squashLanded(dest: Dest) {
+        const root = this.playRoot;
+        const board = this.board;
+        if (!root || !board) return;
+        let food: Node | null = null;
+        if (dest.kind === 'tray') {
+            const tray = this.newestNamed(root, `Tray${dest.index}`);
+            const n = board.trays[dest.index] ? board.trays[dest.index].items.length : 0;
+            food = tray && n > 0 ? tray.getChildByName(`Food${n - 1}`) : null;
+        } else {
+            const wrap = this.newestNamed(root, 'BufferBoard');
+            const slot = wrap ? wrap.getChildByName(`Buffer${dest.index}`) : null;
+            food = slot ? slot.getChildByName('Food') : null;
+        }
+        if (!food) return;
+        const sx = food.scale.x;
+        const sy = food.scale.y;
+        tween(food)
+            .to(0.045, { scale: new Vec3(sx * 1.06, sy * 0.86, 1) }, { easing: easing.quadOut })
+            .to(0.045, { scale: new Vec3(sx, sy, 1) }, { easing: easing.quadOut })
+            .start();
     }
 
     private finishMove(win: boolean) {

@@ -5,6 +5,7 @@ import {
     type FoodId,
     type HintPick,
     type LevelDef,
+    type PlaceFail,
     type PlaceReason,
     type PlaceResult,
     type TrayState,
@@ -297,6 +298,26 @@ export class BoardState {
             return { ok: false, reason: 'anti_split' };
         }
         return { ok: true };
+    }
+
+    /**
+     * 拖到某一格但放不进去时的说明。不改目标、不计步、不收走食材。
+     * 原因和提示格与一次失败的落子相同；已满时不会顺手改选。
+     */
+    explainReject(dest: Dest, item: FoodId, source: 'bag' | 'buffer', bagDepth = 1): PlaceFail {
+        const check = this.canAccept(dest, item, source, bagDepth);
+        let reason: PlaceReason = check.ok ? 'dest_full' : check.reason;
+        if (!check.ok && source === 'bag' && this.bufferEnabled && this.noFridgeAccepts(item, source, bagDepth)) {
+            for (let i = 0; i < this.buffer.length; i++) {
+                if (this.buffer[i] == null) {
+                    reason = 'need_buffer';
+                    break;
+                }
+            }
+        }
+        const result = this.fail(reason, item, bagDepth);
+        if (!result.ok) return result;
+        return { ok: false, reason, item, hintTrays: [], hintBuffers: [] };
     }
 
     /** 冰箱里没有任何一格能收这件。有空格或同种未满格时不算。 */

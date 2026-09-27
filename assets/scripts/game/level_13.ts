@@ -10,9 +10,9 @@ export const LEVEL_13: LevelDef = {
     teach: '三列四种。肉能进容量 2 就直接放',
     trays: [{ cap: 4 }, { cap: 3 }, { cap: 3 }, { cap: 2 }],
     bags: [
-        ['milk', 'milk', 'veg', 'meat'],
-        ['milk', 'milk', 'veg', 'meat'],
-        ['fruit', 'veg', 'fruit', 'fruit'],
+        ['milk', 'meat', 'meat', 'veg'],
+        ['fruit', 'milk', 'milk', 'veg'],
+        ['fruit', 'milk', 'fruit', 'veg'],
     ],
     buffer: 3,
     loseable: true,
@@ -27,18 +27,18 @@ export function selfCheckLevel13(): void {
     if (opened.steps !== 1) throw new Error('L13 place must count a step');
 
     const winScript = [
-        { tray: 1, bag: 2 },
-        { tray: 1, bag: 2 },
-        { tray: 2, bag: 2 },
+        { tray: 1, bag: 0 },
+        { tray: 1, bag: 1 },
         { tray: 1, bag: 2 },
         { tray: 3, bag: 0 },
-        { tray: 2, bag: 0 },
-        { tray: 3, bag: 1 },
+        { tray: 3, bag: 0 },
+        { tray: 0, bag: 0 },
+        { tray: 0, bag: 1 },
+        { tray: 0, bag: 1 },
         { tray: 2, bag: 1 },
-        { tray: 0, bag: 0 },
-        { tray: 0, bag: 0 },
-        { tray: 0, bag: 1 },
-        { tray: 0, bag: 1 },
+        { tray: 2, bag: 2 },
+        { tray: 0, bag: 2 },
+        { tray: 2, bag: 2 },
     ];
     const play = BoardState.fromLevel(LEVEL_13);
     const peak = playScript(play, winScript, 'L13');
@@ -47,16 +47,16 @@ export function selfCheckLevel13(): void {
 
     const wasteScript = [
         { tray: 0, bag: 0 },
-        { tray: 0, bag: 1 },
         { tray: 1, bag: 0 },
-        { tray: 1, bag: 1 },
-        { tray: 2, bag: 2 },
-        { tray: 2, bag: 2 },
-        { tray: 1, bag: 2 },
-        { tray: 2, bag: 2 },
-        { tray: 3, bag: 0 },
-        { tray: 3, bag: 0 },
-        { buffer: 0, bag: 1 },
+        { tray: 1, bag: 0 },
+        { tray: 2, bag: 0 },
+        { tray: 0, bag: 1 },
+        { tray: 2, bag: 1 },
+        { tray: 2, bag: 1 },
+        { tray: 3, bag: 1 },
+        { tray: 0, bag: 2 },
+        { tray: 3, bag: 2 },
+        { buffer: 0, bag: 2 },
     ];
     const fail = BoardState.fromLevel(LEVEL_13);
     playScript(fail, wasteScript, 'L13 waste');

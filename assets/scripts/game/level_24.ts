@@ -10,10 +10,10 @@ export const LEVEL_24: LevelDef = {
     teach: '猕猴桃进小格。锁进容量 3 会锁死',
     trays: [{ cap: 2 }, { cap: 3 }, { cap: 3 }, { cap: 4 }],
     bags: [
-        ['milk', 'milk', 'kiwi'],
-        ['veg', 'veg', 'kiwi'],
-        ['meat', 'meat', 'veg'],
+        ['milk', 'meat', 'kiwi'],
         ['milk', 'milk', 'meat'],
+        ['veg', 'veg', 'milk'],
+        ['meat', 'veg', 'kiwi'],
     ],
     buffer: 3,
     loseable: true,
@@ -29,17 +29,17 @@ export function selfCheckLevel24(): void {
 
     const winScript = [
         { tray: 0, bag: 0 },
-        { tray: 0, bag: 1 },
+        { tray: 0, bag: 3 },
+        { tray: 1, bag: 0 },
         { tray: 1, bag: 1 },
-        { tray: 1, bag: 1 },
-        { tray: 1, bag: 2 },
+        { tray: 3, bag: 0 },
+        { tray: 3, bag: 1 },
+        { tray: 3, bag: 1 },
+        { tray: 3, bag: 2 },
         { tray: 2, bag: 2 },
         { tray: 2, bag: 2 },
         { tray: 2, bag: 3 },
-        { tray: 3, bag: 0 },
-        { tray: 3, bag: 0 },
-        { tray: 3, bag: 3 },
-        { tray: 3, bag: 3 },
+        { tray: 1, bag: 3 },
     ];
     const play = BoardState.fromLevel(LEVEL_24);
     const peak = playScript(play, winScript, 'L24');
@@ -48,16 +48,16 @@ export function selfCheckLevel24(): void {
 
     const wasteScript = [
         { tray: 1, bag: 0 },
-        { tray: 1, bag: 1 },
+        { tray: 0, bag: 0 },
+        { tray: 2, bag: 0 },
+        { tray: 0, bag: 1 },
         { tray: 2, bag: 1 },
         { tray: 2, bag: 1 },
-        { tray: 2, bag: 2 },
-        { tray: 3, bag: 0 },
-        { tray: 3, bag: 0 },
-        { tray: 0, bag: 2 },
-        { tray: 0, bag: 2 },
-        { buffer: 0, bag: 3 },
-        { tray: 3, bag: 3 },
+        { tray: 3, bag: 2 },
+        { tray: 1, bag: 3 },
+        { buffer: 0, bag: 2 },
+        { buffer: 1, bag: 2 },
+        { buffer: 2, bag: 3 },
     ];
     const fail = BoardState.fromLevel(LEVEL_24);
     playScript(fail, wasteScript, 'L24 waste');

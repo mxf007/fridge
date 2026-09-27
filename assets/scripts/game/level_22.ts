@@ -11,10 +11,10 @@ export const LEVEL_22: LevelDef = {
     teach: '菠萝四件必须进大格；葡萄两件进小格',
     trays: [{ cap: 4 }, { cap: 4 }, { cap: 2 }, { cap: 2 }],
     bags: [
+        ['pineapple', 'veg', 'grape'],
         ['milk', 'milk', 'grape'],
-        ['milk', 'milk', 'grape'],
-        ['pineapple', 'pineapple', 'veg'],
-        ['pineapple', 'pineapple', 'veg'],
+        ['pineapple', 'veg', 'pineapple'],
+        ['pineapple', 'milk', 'milk'],
     ],
     buffer: 3,
     loseable: true,
@@ -34,16 +34,16 @@ export function selfCheckLevel22(): void {
     const winScript = [
         { tray: 2, bag: 0 },
         { tray: 2, bag: 1 },
+        { tray: 3, bag: 0 },
         { tray: 0, bag: 0 },
-        { tray: 0, bag: 0 },
-        { tray: 0, bag: 1 },
-        { tray: 0, bag: 1 },
+        { tray: 0, bag: 2 },
         { tray: 3, bag: 2 },
-        { tray: 3, bag: 3 },
-        { tray: 1, bag: 2 },
-        { tray: 1, bag: 2 },
+        { tray: 0, bag: 2 },
+        { tray: 1, bag: 1 },
+        { tray: 1, bag: 1 },
         { tray: 1, bag: 3 },
         { tray: 1, bag: 3 },
+        { tray: 0, bag: 3 },
     ];
     const play = BoardState.fromLevel(LEVEL_22);
     const peak = playScript(play, winScript, 'L22');
@@ -52,16 +52,16 @@ export function selfCheckLevel22(): void {
 
     const wasteScript = [
         { tray: 0, bag: 0 },
+        { tray: 1, bag: 0 },
+        { tray: 2, bag: 0 },
         { tray: 0, bag: 1 },
-        { tray: 1, bag: 0 },
-        { tray: 1, bag: 0 },
-        { tray: 1, bag: 1 },
-        { tray: 1, bag: 1 },
+        { tray: 3, bag: 1 },
+        { tray: 3, bag: 1 },
         { tray: 2, bag: 2 },
-        { tray: 2, bag: 3 },
-        { tray: 3, bag: 2 },
-        { tray: 3, bag: 2 },
-        { buffer: 0, bag: 3 },
+        { tray: 1, bag: 2 },
+        { buffer: 0, bag: 2 },
+        { buffer: 1, bag: 3 },
+        { buffer: 2, bag: 3 },
     ];
     const fail = BoardState.fromLevel(LEVEL_22);
     playScript(fail, wasteScript, 'L22 waste');

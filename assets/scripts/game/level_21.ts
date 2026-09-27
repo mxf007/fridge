@@ -10,10 +10,10 @@ export const LEVEL_21: LevelDef = {
     teach: '剩菜三件占一格；肉四件进大格',
     trays: [{ cap: 3 }, { cap: 3 }, { cap: 3 }, { cap: 4 }],
     bags: [
-        ['veg', 'meat', 'meat', 'leftover'],
-        ['milk', 'milk', 'leftover'],
+        ['meat', 'milk', 'meat', 'meat'],
         ['veg', 'veg', 'leftover'],
-        ['milk', 'meat', 'meat'],
+        ['milk', 'meat', 'leftover'],
+        ['veg', 'milk', 'leftover'],
     ],
     buffer: 3,
     loseable: true,
@@ -28,19 +28,19 @@ export function selfCheckLevel21(): void {
     if (opened.steps !== 1) throw new Error('L21 place must count a step');
 
     const winScript = [
+        { tray: 3, bag: 0 },
+        { tray: 3, bag: 0 },
         { tray: 0, bag: 0 },
-        { tray: 0, bag: 1 },
+        { tray: 3, bag: 0 },
+        { tray: 1, bag: 1 },
+        { tray: 1, bag: 2 },
+        { tray: 3, bag: 2 },
         { tray: 0, bag: 2 },
-        { tray: 1, bag: 1 },
-        { tray: 1, bag: 1 },
-        { tray: 2, bag: 2 },
-        { tray: 2, bag: 2 },
-        { tray: 3, bag: 0 },
-        { tray: 3, bag: 0 },
-        { tray: 2, bag: 0 },
-        { tray: 3, bag: 3 },
-        { tray: 3, bag: 3 },
         { tray: 1, bag: 3 },
+        { tray: 0, bag: 3 },
+        { tray: 2, bag: 1 },
+        { tray: 2, bag: 1 },
+        { tray: 2, bag: 3 },
     ];
     const play = BoardState.fromLevel(LEVEL_21);
     const peak = playScript(play, winScript, 'L21');
@@ -48,18 +48,18 @@ export function selfCheckLevel21(): void {
     if (peak !== 0) throw new Error(`L21 should not need the counter, peak ${peak}`);
 
     const wasteScript = [
-        { tray: 3, bag: 0 },
-        { tray: 3, bag: 1 },
-        { tray: 3, bag: 2 },
-        { tray: 0, bag: 1 },
-        { tray: 0, bag: 1 },
-        { tray: 1, bag: 2 },
-        { tray: 1, bag: 2 },
-        { tray: 2, bag: 0 },
-        { tray: 2, bag: 0 },
+        { tray: 0, bag: 0 },
+        { tray: 0, bag: 0 },
         { tray: 1, bag: 0 },
+        { tray: 0, bag: 0 },
+        { tray: 2, bag: 1 },
+        { tray: 3, bag: 1 },
+        { tray: 3, bag: 1 },
+        { tray: 2, bag: 2 },
         { tray: 2, bag: 3 },
-        { buffer: 0, bag: 3 },
+        { tray: 1, bag: 3 },
+        { tray: 3, bag: 3 },
+        { buffer: 0, bag: 2 },
     ];
     const fail = BoardState.fromLevel(LEVEL_21);
     playScript(fail, wasteScript, 'L21 waste');

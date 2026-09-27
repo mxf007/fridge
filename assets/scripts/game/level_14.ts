@@ -10,10 +10,10 @@ export const LEVEL_14: LevelDef = {
     teach: '看容量。小件别进大格',
     trays: [{ cap: 5 }, { cap: 3 }, { cap: 3 }, { cap: 2 }],
     bags: [
-        ['milk', 'milk', 'meat', 'milk'],
-        ['veg', 'veg', 'meat'],
-        ['fruit', 'fruit', 'veg'],
-        ['milk', 'milk', 'fruit'],
+        ['fruit', 'fruit', 'meat', 'milk'],
+        ['veg', 'fruit', 'meat'],
+        ['milk', 'veg', 'milk'],
+        ['milk', 'milk', 'veg'],
     ],
     buffer: 3,
     loseable: true,
@@ -29,18 +29,18 @@ export function selfCheckLevel14(): void {
 
     const winScript = [
         { tray: 0, bag: 0 },
-        { tray: 1, bag: 2 },
+        { tray: 0, bag: 2 },
+        { tray: 3, bag: 0 },
+        { tray: 3, bag: 1 },
+        { tray: 1, bag: 0 },
+        { tray: 1, bag: 0 },
+        { tray: 1, bag: 1 },
+        { tray: 2, bag: 1 },
         { tray: 2, bag: 2 },
-        { tray: 2, bag: 2 },
+        { tray: 0, bag: 2 },
         { tray: 2, bag: 3 },
         { tray: 0, bag: 3 },
         { tray: 0, bag: 3 },
-        { tray: 3, bag: 0 },
-        { tray: 0, bag: 0 },
-        { tray: 0, bag: 0 },
-        { tray: 3, bag: 1 },
-        { tray: 1, bag: 1 },
-        { tray: 1, bag: 1 },
     ];
     const play = BoardState.fromLevel(LEVEL_14);
     const peak = playScript(play, winScript, 'L14');
@@ -48,17 +48,17 @@ export function selfCheckLevel14(): void {
     if (peak !== 0) throw new Error(`L14 should not need the counter, peak ${peak}`);
 
     const wasteScript = [
-        { buffer: 0, bag: 0 },
+        { tray: 1, bag: 0 },
         { tray: 0, bag: 0 },
+        { tray: 2, bag: 0 },
+        { tray: 2, bag: 0 },
         { tray: 0, bag: 1 },
-        { tray: 1, bag: 1 },
-        { tray: 1, bag: 1 },
+        { tray: 2, bag: 1 },
+        { tray: 3, bag: 1 },
         { tray: 1, bag: 2 },
-        { tray: 2, bag: 2 },
-        { tray: 2, bag: 2 },
-        { tray: 2, bag: 3 },
-        { tray: 3, bag: 0 },
-        { tray: 3, bag: 0 },
+        { tray: 3, bag: 2 },
+        { tray: 1, bag: 2 },
+        { buffer: 0, bag: 3 },
         { buffer: 1, bag: 3 },
     ];
     const fail = BoardState.fromLevel(LEVEL_14);

@@ -10,10 +10,10 @@ export const LEVEL_12: LevelDef = {
     teach: '肉两件进两件格。冰箱能收就直接收',
     trays: [{ cap: 4 }, { cap: 3 }, { cap: 3 }, { cap: 2 }],
     bags: [
-        ['milk', 'milk', 'meat'],
-        ['veg', 'veg', 'meat'],
-        ['fruit', 'fruit', 'veg'],
-        ['milk', 'milk', 'fruit'],
+        ['fruit', 'milk', 'fruit'],
+        ['fruit', 'meat', 'meat'],
+        ['veg', 'veg', 'milk'],
+        ['milk', 'veg', 'milk'],
     ],
     buffer: 3,
     loseable: true,
@@ -28,18 +28,18 @@ export function selfCheckLevel12(): void {
     if (opened.steps !== 1) throw new Error('L12 place must count a step');
 
     const winScript = [
-        { tray: 1, bag: 2 },
+        { tray: 1, bag: 0 },
+        { tray: 0, bag: 0 },
+        { tray: 1, bag: 0 },
+        { tray: 0, bag: 2 },
+        { tray: 0, bag: 3 },
+        { tray: 3, bag: 1 },
+        { tray: 3, bag: 1 },
+        { tray: 1, bag: 1 },
         { tray: 2, bag: 2 },
         { tray: 2, bag: 2 },
         { tray: 2, bag: 3 },
         { tray: 0, bag: 3 },
-        { tray: 0, bag: 3 },
-        { tray: 3, bag: 0 },
-        { tray: 0, bag: 0 },
-        { tray: 0, bag: 0 },
-        { tray: 3, bag: 1 },
-        { tray: 1, bag: 1 },
-        { tray: 1, bag: 1 },
     ];
     const play = BoardState.fromLevel(LEVEL_12);
     const peak = playScript(play, winScript, 'L12');
@@ -48,15 +48,15 @@ export function selfCheckLevel12(): void {
 
     const wasteScript = [
         { tray: 0, bag: 0 },
+        { tray: 1, bag: 0 },
+        { tray: 0, bag: 0 },
+        { tray: 2, bag: 1 },
+        { tray: 2, bag: 1 },
         { tray: 0, bag: 1 },
-        { tray: 1, bag: 1 },
-        { tray: 1, bag: 1 },
         { tray: 1, bag: 2 },
-        { tray: 2, bag: 2 },
-        { tray: 2, bag: 2 },
-        { tray: 2, bag: 3 },
-        { tray: 3, bag: 0 },
-        { tray: 3, bag: 0 },
+        { tray: 3, bag: 2 },
+        { tray: 3, bag: 2 },
+        { tray: 1, bag: 3 },
         { buffer: 0, bag: 3 },
     ];
     const fail = BoardState.fromLevel(LEVEL_12);

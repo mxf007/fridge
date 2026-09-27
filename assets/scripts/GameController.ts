@@ -256,6 +256,8 @@ export class GameController extends Component {
     private btnStart: SpriteFrame | null = null;
     private bagFrames: Partial<Record<FoodId, SpriteFrame>> = {};
     private busy = false;
+    /** 失败结算已经出现。这时角上的重开仍要能用。 */
+    private levelFailed = false;
     private animateDoorIndex: number | null = null;
     private holdWin = false;
     private firstKindToast = true;
@@ -1097,6 +1099,7 @@ export class GameController extends Component {
         }
         this.board = BoardState.fromLevel(level);
         this.busy = false;
+        this.levelFailed = false;
         this.animateDoorIndex = null;
         this.holdWin = false;
         this.firstKindToast = true;
@@ -1317,7 +1320,8 @@ export class GameController extends Component {
     }
 
     private restartLevel() {
-        if (!this.board || this.busy) return;
+        if (!this.board) return;
+        if (this.busy && !this.levelFailed) return;
         this.startLevel(this.board.level);
     }
 
@@ -1392,6 +1396,7 @@ export class GameController extends Component {
     private goHome() {
         this.unscheduleAllCallbacks();
         this.busy = false;
+        this.levelFailed = false;
         this.holdWin = false;
         this.animateDoorIndex = null;
         this.board = null;
@@ -2921,9 +2926,11 @@ export class GameController extends Component {
         if (!board) return;
         if (!board.level.loseable) {
             console.log(`[fridge] unexpected fail L${board.level.id} ${reason}`);
+            this.busy = false;
             this.restartLevel();
             return;
         }
+        this.levelFailed = true;
         this.busy = true;
         this.flashFail(reason, () => this.spawnFailCard(reason));
     }

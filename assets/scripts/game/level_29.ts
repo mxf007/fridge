@@ -10,11 +10,11 @@ export const LEVEL_29: LevelDef = {
     teach: '酱两件进小格；西瓜三件占一格',
     trays: [{ cap: 3 }, { cap: 3 }, { cap: 2 }, { cap: 3 }, { cap: 4 }],
     bags: [
+        ['veg', 'milk', 'watermelon'],
         ['meat', 'meat', 'sauce'],
-        ['milk', 'milk', 'sauce'],
-        ['veg', 'veg', 'watermelon'],
-        ['watermelon', 'watermelon', 'meat'],
-        ['milk', 'veg', 'meat'],
+        ['watermelon', 'watermelon', 'sauce'],
+        ['milk', 'veg', 'milk'],
+        ['meat', 'meat', 'veg'],
     ],
     buffer: 3,
     loseable: true,
@@ -29,21 +29,21 @@ export function selfCheckLevel29(): void {
     if (opened.steps !== 1) throw new Error('L29 place must count a step');
 
     const winScript = [
-        { tray: 0, bag: 2 },
-        { tray: 1, bag: 2 },
-        { tray: 1, bag: 2 },
-        { tray: 2, bag: 0 },
-        { tray: 2, bag: 1 },
-        { tray: 3, bag: 1 },
-        { tray: 3, bag: 1 },
-        { tray: 4, bag: 0 },
-        { tray: 4, bag: 0 },
-        { tray: 4, bag: 3 },
-        { tray: 0, bag: 3 },
-        { tray: 0, bag: 3 },
-        { tray: 4, bag: 4 },
-        { tray: 1, bag: 4 },
+        { tray: 0, bag: 0 },
+        { tray: 1, bag: 0 },
+        { tray: 1, bag: 3 },
+        { tray: 3, bag: 0 },
+        { tray: 3, bag: 3 },
+        { tray: 1, bag: 3 },
         { tray: 3, bag: 4 },
+        { tray: 2, bag: 1 },
+        { tray: 2, bag: 2 },
+        { tray: 0, bag: 2 },
+        { tray: 0, bag: 2 },
+        { tray: 4, bag: 1 },
+        { tray: 4, bag: 1 },
+        { tray: 4, bag: 4 },
+        { tray: 4, bag: 4 },
     ];
     const play = BoardState.fromLevel(LEVEL_29);
     const peak = playScript(play, winScript, 'L29');
@@ -51,20 +51,19 @@ export function selfCheckLevel29(): void {
     if (peak !== 0) throw new Error(`L29 should not need the counter, peak ${peak}`);
 
     const wasteScript = [
+        { tray: 2, bag: 0 },
         { tray: 0, bag: 0 },
-        { tray: 0, bag: 1 },
-        { tray: 1, bag: 1 },
-        { tray: 1, bag: 1 },
+        { tray: 1, bag: 0 },
+        { tray: 3, bag: 1 },
+        { tray: 4, bag: 1 },
+        { tray: 4, bag: 1 },
         { tray: 3, bag: 2 },
-        { tray: 4, bag: 0 },
-        { tray: 4, bag: 0 },
-        { tray: 4, bag: 3 },
-        { tray: 3, bag: 3 },
-        { tray: 3, bag: 3 },
+        { tray: 2, bag: 2 },
+        { tray: 0, bag: 3 },
+        { tray: 1, bag: 3 },
+        { tray: 0, bag: 3 },
+        { tray: 1, bag: 4 },
         { tray: 4, bag: 4 },
-        { tray: 2, bag: 2 },
-        { tray: 2, bag: 2 },
-        { buffer: 0, bag: 4 },
     ];
     const fail = BoardState.fromLevel(LEVEL_29);
     playScript(fail, wasteScript, 'L29 waste');

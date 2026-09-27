@@ -10,10 +10,10 @@ export const LEVEL_23: LevelDef = {
     teach: '酱两件进小格；肉和酱颜色近，看清再换格',
     trays: [{ cap: 3 }, { cap: 3 }, { cap: 2 }, { cap: 4 }],
     bags: [
-        ['meat', 'meat', 'sauce'],
-        ['milk', 'milk', 'sauce'],
-        ['veg', 'veg', 'meat'],
         ['milk', 'veg', 'meat'],
+        ['veg', 'veg', 'sauce'],
+        ['milk', 'meat', 'meat'],
+        ['meat', 'milk', 'sauce'],
     ],
     buffer: 3,
     loseable: true,
@@ -28,18 +28,18 @@ export function selfCheckLevel23(): void {
     if (opened.steps !== 1) throw new Error('L23 place must count a step');
 
     const winScript = [
-        { tray: 2, bag: 0 },
+        { tray: 3, bag: 0 },
+        { tray: 3, bag: 2 },
+        { tray: 3, bag: 2 },
+        { tray: 0, bag: 0 },
+        { tray: 1, bag: 0 },
+        { tray: 1, bag: 2 },
         { tray: 2, bag: 1 },
         { tray: 0, bag: 1 },
         { tray: 0, bag: 1 },
-        { tray: 3, bag: 0 },
-        { tray: 3, bag: 0 },
-        { tray: 3, bag: 2 },
-        { tray: 3, bag: 3 },
-        { tray: 1, bag: 2 },
-        { tray: 1, bag: 2 },
+        { tray: 2, bag: 3 },
         { tray: 1, bag: 3 },
-        { tray: 0, bag: 3 },
+        { tray: 3, bag: 3 },
     ];
     const play = BoardState.fromLevel(LEVEL_23);
     const peak = playScript(play, winScript, 'L23');
@@ -48,15 +48,15 @@ export function selfCheckLevel23(): void {
 
     const wasteScript = [
         { tray: 0, bag: 0 },
-        { tray: 0, bag: 1 },
+        { tray: 1, bag: 0 },
+        { tray: 2, bag: 0 },
+        { tray: 3, bag: 1 },
         { tray: 1, bag: 1 },
         { tray: 1, bag: 1 },
-        { tray: 3, bag: 0 },
-        { tray: 3, bag: 0 },
-        { tray: 3, bag: 2 },
+        { tray: 0, bag: 2 },
+        { tray: 0, bag: 2 },
+        { tray: 2, bag: 2 },
         { tray: 3, bag: 3 },
-        { tray: 2, bag: 2 },
-        { tray: 2, bag: 2 },
         { buffer: 0, bag: 3 },
     ];
     const fail = BoardState.fromLevel(LEVEL_23);

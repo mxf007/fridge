@@ -11,9 +11,9 @@ export const LEVEL_16: LevelDef = {
     teach: '第五种：酱。两件酱进两件格',
     trays: [{ cap: 4 }, { cap: 3 }, { cap: 2 }],
     bags: [
-        ['milk', 'milk', 'sauce'],
-        ['veg', 'veg', 'sauce'],
-        ['milk', 'milk', 'veg'],
+        ['veg', 'veg', 'milk'],
+        ['milk', 'sauce', 'milk'],
+        ['veg', 'milk', 'sauce'],
     ],
     buffer: 3,
     loseable: true,
@@ -31,15 +31,15 @@ export function selfCheckLevel16(): void {
     if (opened.steps !== 1) throw new Error('L16 place must count a step');
 
     const winScript = [
-        { tray: 1, bag: 2 },
-        { tray: 0, bag: 2 },
-        { tray: 0, bag: 2 },
-        { tray: 2, bag: 0 },
         { tray: 0, bag: 0 },
-        { tray: 0, bag: 0 },
+        { tray: 0, bag: 1 },
+        { tray: 1, bag: 0 },
+        { tray: 1, bag: 0 },
         { tray: 2, bag: 1 },
-        { tray: 1, bag: 1 },
-        { tray: 1, bag: 1 },
+        { tray: 0, bag: 1 },
+        { tray: 2, bag: 2 },
+        { tray: 0, bag: 2 },
+        { tray: 1, bag: 2 },
     ];
     const play = BoardState.fromLevel(LEVEL_16);
     const peak = playScript(play, winScript, 'L16');
@@ -47,13 +47,13 @@ export function selfCheckLevel16(): void {
     if (peak !== 0) throw new Error(`L16 should not need the counter, peak ${peak}`);
 
     const wasteScript = [
+        { tray: 1, bag: 0 },
         { tray: 0, bag: 0 },
-        { tray: 0, bag: 1 },
+        { tray: 0, bag: 0 },
         { tray: 1, bag: 1 },
+        { tray: 2, bag: 1 },
         { tray: 1, bag: 1 },
-        { tray: 1, bag: 2 },
-        { tray: 2, bag: 0 },
-        { tray: 2, bag: 0 },
+        { tray: 2, bag: 2 },
         { buffer: 0, bag: 2 },
     ];
     const fail = BoardState.fromLevel(LEVEL_16);

@@ -11,9 +11,9 @@ export const LEVEL_27: LevelDef = {
     trays: [{ cap: 4 }, { cap: 2 }, { cap: 2 }, { cap: 2 }, { cap: 2 }],
     bags: [
         ['milk', 'veg', 'veg'],
-        ['milk', 'meat', 'meat'],
-        ['milk', 'grape', 'grape'],
-        ['milk', 'lemon', 'lemon'],
+        ['lemon', 'grape', 'meat'],
+        ['milk', 'meat', 'lemon'],
+        ['milk', 'milk', 'grape'],
     ],
     buffer: 3,
     loseable: true,
@@ -32,14 +32,14 @@ export function selfCheckLevel27(): void {
         { tray: 1, bag: 0 },
         { tray: 0, bag: 0 },
         { tray: 2, bag: 1 },
-        { tray: 2, bag: 1 },
-        { tray: 0, bag: 1 },
-        { tray: 3, bag: 2 },
-        { tray: 3, bag: 2 },
-        { tray: 0, bag: 2 },
-        { tray: 4, bag: 3 },
-        { tray: 4, bag: 3 },
+        { tray: 3, bag: 1 },
+        { tray: 3, bag: 3 },
         { tray: 0, bag: 3 },
+        { tray: 0, bag: 3 },
+        { tray: 4, bag: 1 },
+        { tray: 4, bag: 2 },
+        { tray: 2, bag: 2 },
+        { tray: 0, bag: 2 },
     ];
     const play = BoardState.fromLevel(LEVEL_27);
     const peak = playScript(play, winScript, 'L27');
@@ -49,12 +49,15 @@ export function selfCheckLevel27(): void {
     const wasteScript = [
         { tray: 0, bag: 0 },
         { tray: 0, bag: 0 },
-        { tray: 1, bag: 1 },
-        { tray: 1, bag: 1 },
+        { tray: 1, bag: 0 },
+        { tray: 2, bag: 1 },
+        { tray: 3, bag: 1 },
+        { tray: 4, bag: 1 },
+        { tray: 4, bag: 2 },
         { tray: 2, bag: 2 },
-        { tray: 2, bag: 2 },
+        { tray: 1, bag: 2 },
         { tray: 3, bag: 3 },
-        { tray: 3, bag: 3 },
+        { buffer: 0, bag: 3 },
     ];
     const fail = BoardState.fromLevel(LEVEL_27);
     playScript(fail, wasteScript, 'L27 waste');

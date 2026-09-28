@@ -27,38 +27,9 @@ import {
 } from 'cc';
 import { BoardState } from './game/BoardState';
 import { packTrayGrid, TRAY_GAP, TRAY_WALL_H, TRAY_WALL_TOP, TRAY_WALL_W } from './game/levelLayout';
-import { LEVEL_01 } from './game/level_01';
-import { LEVEL_02 } from './game/level_02';
-import { LEVEL_03 } from './game/level_03';
-import { LEVEL_04 } from './game/level_04';
-import { LEVEL_05 } from './game/level_05';
-import { LEVEL_06 } from './game/level_06';
-import { LEVEL_07 } from './game/level_07';
-import { LEVEL_08 } from './game/level_08';
-import { LEVEL_09 } from './game/level_09';
-import { LEVEL_10 } from './game/level_10';
-import { LEVEL_11 } from './game/level_11';
-import { LEVEL_12 } from './game/level_12';
-import { LEVEL_13 } from './game/level_13';
-import { LEVEL_14 } from './game/level_14';
-import { LEVEL_15 } from './game/level_15';
-import { LEVEL_16 } from './game/level_16';
-import { LEVEL_17 } from './game/level_17';
-import { LEVEL_18 } from './game/level_18';
-import { LEVEL_19 } from './game/level_19';
-import { LEVEL_20 } from './game/level_20';
-import { LEVEL_21 } from './game/level_21';
-import { LEVEL_22 } from './game/level_22';
-import { LEVEL_23 } from './game/level_23';
-import { LEVEL_24 } from './game/level_24';
-import { LEVEL_25 } from './game/level_25';
-import { LEVEL_26 } from './game/level_26';
-import { LEVEL_27 } from './game/level_27';
-import { LEVEL_28 } from './game/level_28';
-import { LEVEL_29 } from './game/level_29';
-import { LEVEL_30 } from './game/level_30';
 import { albumStatusLine, noteAlbumWin, prepareAlbum, visibleAlbumGrade, winStepLine } from './game/AlbumState';
-import { playSfx } from './game/Sfx';
+import { levelById as levelDefById, nextPlayable as nextPlayableLevel, PLAYABLE } from './game/playableLevels';
+import { playBtnClick, playFridgeDrop, playSfx, playTrayDoorClose, preloadSfx } from './game/Sfx';
 import type { AlbumGrade } from './game/AlbumState';
 import type { AlbumEntry } from './game/AlbumState';
 import type { Dest, FailReason, FoodId, HintPick, LevelDef, PlaceFail, PlaceReason } from './game/types';
@@ -88,6 +59,8 @@ const BAG_FRONT_SEAT_Y = -380;
 const BAG_ROW_GAP = 112;
 /** 栈顶屏幕 y=632，木框底留白 24。 */
 const BAG_TOP_LIMIT = 8;
+const DESIGN_W = 750;
+const DESIGN_H = 1334;
 /** buffer_board.png 720×220 上三格奶油盘：中心相对木板中心（Y 向上）。 */
 const BUF_BOARD_W = 720;
 const BUF_BOARD_H = 220;
@@ -102,7 +75,8 @@ const TRAY_FOOD_H = 70;
 const TRAY_FOOD_GAP = 4;
 const FLY_SEC = 0.22;
 const DOOR_SEC = 0.28;
-const WIN_DELAY = 0.5;
+/** 胜负判定后，延时再出结算（门合完/win 判定后计）。 */
+const SETTLE_DELAY = 0.5;
 const WHEAT = new Color(212, 176, 120, 255);
 const TABLE_TOP = new Color(248, 240, 228, 255);
 const TABLE_FRONT = new Color(186, 154, 122, 255);
@@ -163,7 +137,6 @@ const UUID = {
 };
 
 const HOME_NODES = ['Bg', 'Title', 'BtnStart', 'AlbumLink', 'HomeBarMask'];
-const PLAYABLE: LevelDef[] = [LEVEL_01, LEVEL_02, LEVEL_03, LEVEL_04, LEVEL_05, LEVEL_06, LEVEL_07, LEVEL_08, LEVEL_09, LEVEL_10, LEVEL_11, LEVEL_12, LEVEL_13, LEVEL_14, LEVEL_15, LEVEL_16, LEVEL_17, LEVEL_18, LEVEL_19, LEVEL_20, LEVEL_21, LEVEL_22, LEVEL_23, LEVEL_24, LEVEL_25, LEVEL_26, LEVEL_27, LEVEL_28, LEVEL_29, LEVEL_30];
 const CLEARED_KEY = 'fridge_cleared';
 const MILESTONE_KEY = (n: number) => `fridge_milestone_${n}`;
 const MILESTONE_NS = [10, 20, 30];
@@ -326,6 +299,7 @@ export class GameController extends Component {
         this.bindGm();
         this.bindHome();
         this.refreshAlbumLink();
+        void preloadSfx();
         void this.ensureLevel1Frames();
         void this.ensureRestFrames();
         void this.ensureAlbumFrames();
@@ -360,12 +334,18 @@ export class GameController extends Component {
         if (!btn) return;
         if (!btn.getComponent(Button)) btn.addComponent(Button);
         btn.off(Node.EventType.TOUCH_END);
-        btn.on(Node.EventType.TOUCH_END, () => this.startLevel(this.continueLevel()), this);
+        btn.on(Node.EventType.TOUCH_END, () => {
+            playBtnClick();
+            this.startLevel(this.continueLevel());
+        }, this);
         const album = this.node.getChildByName('AlbumLink');
         if (album) {
             if (!album.getComponent(Button)) album.addComponent(Button);
             album.off(Node.EventType.TOUCH_END);
-            album.on(Node.EventType.TOUCH_END, () => this.openAlbum(), this);
+            album.on(Node.EventType.TOUCH_END, () => {
+                playBtnClick();
+                this.openAlbum();
+            }, this);
         }
         this.polishHomeChrome();
         this.refreshAlbumLink();
@@ -417,7 +397,7 @@ export class GameController extends Component {
         const link = this.node.getChildByName('AlbumLink');
         if (!link) return;
         const label = link.getComponent(Label) || link.getComponentInChildren(Label);
-        if (label) label.string = `我收过的冰箱  ${this.clearedId()}/30  >`;
+        if (label) label.string = `我收过的冰箱  ${this.clearedId()}/${PLAYABLE.length}  >`;
     }
 
     /** 先出面板。食材图齐了再填看得见的卡片，槽位内容用存档里的种类。 */
@@ -465,6 +445,7 @@ export class GameController extends Component {
         dimG.fill();
         layer.addChild(dim);
         dim.on(Node.EventType.TOUCH_END, () => {
+            playBtnClick();
             if (layer.isValid) layer.destroy();
         }, this);
 
@@ -482,7 +463,7 @@ export class GameController extends Component {
         this.addLabel(panel, 'Title', '我收过的冰箱', 36, WALNUT, 560, 48).setPosition(0, 430, 0);
         const cleared = this.clearedId();
         const album = prepareAlbum(sys.localStorage, cleared, (id) => this.levelById(id));
-        this.addLabel(panel, 'Progress', `${cleared} / 30`, 26, SAGE, 200, 36).setPosition(0, 380, 0);
+        this.addLabel(panel, 'Progress', `${cleared} / ${PLAYABLE.length}`, 26, SAGE, 200, 36).setPosition(0, 380, 0);
         this.addLabel(panel, 'ReplayHint', '点一下再收 · 按住可分享', 20, FRAME, 480, 28).setPosition(0, 348, 0);
 
         const cols = 3;
@@ -491,8 +472,8 @@ export class GameController extends Component {
         const gapX = 14;
         const gapY = 16;
         const pitch = cardH + gapY;
-        const maxShow = Math.min(cleared, 30);
-        const ghost = cleared >= 1 && cleared < 30;
+        const maxShow = Math.min(cleared, PLAYABLE.length);
+        const ghost = cleared >= 1 && cleared < PLAYABLE.length;
         const total = maxShow + (ghost ? 1 : 0);
         const rows = Math.max(1, Math.ceil(total / cols));
         const contentH = total > 0 ? rows * pitch - gapY : 0;
@@ -725,6 +706,7 @@ export class GameController extends Component {
                 if (!next) {
                     this.showToast('这一关还没收拾');
                 } else {
+                    playBtnClick();
                     const layer = this.node.getChildByName('AlbumLayer');
                     if (layer && layer.isValid) layer.destroy();
                     this.startLevel(next);
@@ -955,7 +937,10 @@ export class GameController extends Component {
         const close = () => {
             if (layer.isValid) layer.destroy();
         };
-        dim.on(Node.EventType.TOUCH_END, close, this);
+        dim.on(Node.EventType.TOUCH_END, () => {
+            playBtnClick();
+            close();
+        }, this);
         this.scheduleOnce(close, 2.4);
     }
 
@@ -980,7 +965,10 @@ export class GameController extends Component {
         const close = () => {
             if (layer.isValid) layer.destroy();
         };
-        dim.on(Node.EventType.TOUCH_END, close, this);
+        dim.on(Node.EventType.TOUCH_END, () => {
+            playBtnClick();
+            close();
+        }, this);
         this.scheduleOnce(close, 2.4);
     }
 
@@ -999,10 +987,7 @@ export class GameController extends Component {
     }
 
     private levelById(id: number): LevelDef | null {
-        for (let i = 0; i < PLAYABLE.length; i++) {
-            if (PLAYABLE[i].id === id) return PLAYABLE[i];
-        }
-        return null;
+        return levelDefById(id);
     }
 
     private markCleared(id: number) {
@@ -1168,10 +1153,7 @@ export class GameController extends Component {
     }
 
     private nextPlayable(id: number): LevelDef | null {
-        for (let i = 0; i < PLAYABLE.length; i++) {
-            if (PLAYABLE[i].id === id + 1) return PLAYABLE[i];
-        }
-        return null;
+        return nextPlayableLevel(id);
     }
 
     private continueLevel(): LevelDef {
@@ -1198,14 +1180,19 @@ export class GameController extends Component {
         const ui = this.node.getComponent(UITransform);
         if (ui && ui.width > 0 && ui.height > 0) return { w: ui.width, h: ui.height };
         const vis = view.getVisibleSize();
-        return { w: vis.width || 720, h: vis.height || 1280 };
+        return { w: vis.width || DESIGN_W, h: vis.height || DESIGN_H };
     }
 
     private render() {
         const root = this.playRoot;
         const board = this.board;
         if (!root || !board) return;
-        root.destroyAllChildren();
+        // destroyAllChildren 本帧末才真正销毁；先 detach 避免旧 BufferBoard 继续吃触摸。
+        const stale = root.children.slice();
+        for (let i = 0; i < stale.length; i++) {
+            stale[i].removeFromParent();
+            stale[i].destroy();
+        }
 
         const size = this.canvasSize();
         const rootUi = root.getComponent(UITransform);
@@ -1219,8 +1206,9 @@ export class GameController extends Component {
         this.drawMidProps(root);
         this.drawBags(root, board);
         this.drawWorktopFront(root);
-        this.drawBuffer(root, board);
         this.drawHud(root);
+        // 柜台必须在 HUD 之后画，触摸优先于顶栏；空槽 HitPad 始终在最上以免被提示框挡住。
+        this.drawBuffer(root, board);
         if (this.sizeTeach && !board.isWin()) this.drawSizeTeach(root);
 
         if (board.isWin() && !this.holdWin) {
@@ -1287,7 +1275,7 @@ export class GameController extends Component {
         const fallback = 96;
         const wxApi = (globalThis as { wx?: WechatMiniGame }).wx;
         if (!wxApi) return fallback;
-        const visibleW = view.getVisibleSize().width || 720;
+        const visibleW = view.getVisibleSize().width || DESIGN_W;
         try {
             const info = wxApi.getWindowInfo ? wxApi.getWindowInfo() : wxApi.getSystemInfoSync?.();
             const windowW = info && (info.windowWidth || info.screenWidth);
@@ -1347,6 +1335,7 @@ export class GameController extends Component {
         }, this);
         btn.on(Node.EventType.TOUCH_END, () => {
             tween(btn).to(0.08, { scale: new Vec3(1, 1, 1) }).start();
+            playBtnClick();
             tap();
         }, this);
     }
@@ -1394,8 +1383,8 @@ export class GameController extends Component {
         if (old) old.destroy();
         const layer = new Node('HintAd');
         layer.layer = UI_2D;
-        layer.addComponent(UITransform).setContentSize(720, 1280);
-        this.addSprite(layer, 'Dim', this.builtin, 720, 1280, 0, 0, new Color(61, 50, 41, 102));
+        layer.addComponent(UITransform).setContentSize(DESIGN_W, DESIGN_H);
+        this.addSprite(layer, 'Dim', this.builtin, DESIGN_W, DESIGN_H, 0, 0, new Color(61, 50, 41, 102));
         const card = new Node('Card');
         card.layer = UI_2D;
         card.addComponent(UITransform).setContentSize(420, 120);
@@ -1540,7 +1529,7 @@ export class GameController extends Component {
 
     /** 屏幕左上 y → Cocos 中心原点。 */
     private screenToCocosY(screenY: number): number {
-        return 640 - screenY;
+        return DESIGN_H / 2 - screenY;
     }
 
     /** 短边 2P、长边 cap×P，整组居中铺进墙面。横格是竖格转 90 度。 */
@@ -2273,10 +2262,17 @@ export class GameController extends Component {
         return { w: Math.round(food * 0.88), h: Math.round(food * 0.88) };
     }
 
+    /** 5 层及以上只占 4 层柱高，多出来的层用数字标出。 */
+    private shownStack(len: number): number {
+        if (len <= 0) return 0;
+        return len > 4 ? 4 : len;
+    }
+
     /** 每层都是同一张整盘，层距只露出前唇。 */
     private columnHeight(layout: { trayH: number; step: number }, len: number): number {
-        if (len <= 0) return 0;
-        return layout.trayH + layout.step * (len - 1);
+        const shown = this.shownStack(len);
+        if (shown <= 0) return 0;
+        return layout.trayH + layout.step * (shown - 1);
     }
 
     private bagAnchorY(board: BoardState): number {
@@ -2295,9 +2291,21 @@ export class GameController extends Component {
         return anchor;
     }
 
-    private bagSeatYForRow(row: 'front' | 'back', layout: { trayH: number; step: number }, maxLenInRow: number): number {
+    /** 前后排纵向间距；§5.7 第 41 关起 6 列深栈，后排整体上移避免被前排 lip 挡。 */
+    private bagRowGap(levelId: number): number {
+        if (levelId > 40) return BAG_ROW_GAP + 44;
+        return BAG_ROW_GAP;
+    }
+
+    private bagSeatYForRow(
+        row: 'front' | 'back',
+        layout: { trayH: number; step: number },
+        maxLenInRow: number,
+        levelId: number,
+    ): number {
         const h = this.columnHeight(layout, maxLenInRow);
-        let seat = row === 'front' ? BAG_FRONT_SEAT_Y : BAG_FRONT_SEAT_Y + BAG_ROW_GAP;
+        const rowGap = this.bagRowGap(levelId);
+        let seat = row === 'front' ? BAG_FRONT_SEAT_Y : BAG_FRONT_SEAT_Y + rowGap;
         if (row === 'back') {
             const scale = BAG_BACK_SCALE;
             const top = seat + h * scale;
@@ -2353,7 +2361,7 @@ export class GameController extends Component {
             if (len > maxLen) maxLen = len;
         }
         const scale = row === 'back' ? BAG_BACK_SCALE : 1;
-        const seat = this.bagSeatYForRow(row, layout, maxLen);
+        const seat = this.bagSeatYForRow(row, layout, maxLen, board.level.id);
         const rowN = cols.length;
         for (let slot = 0; slot < cols.length; slot++) {
             const c = cols[slot];
@@ -2382,6 +2390,7 @@ export class GameController extends Component {
         const col = board.bags[c];
         const count = col.length;
         if (count <= 0) return null;
+        const shown = this.shownStack(count);
         const x = (slot - (rowN - 1) / 2) * (layout.w + layout.gap) + xShift;
         const h = this.columnHeight(layout, count);
         const colNode = new Node(`Bag${c}`);
@@ -2400,8 +2409,13 @@ export class GameController extends Component {
         sg.fill();
         colNode.addChild(shadow);
 
-        for (let i = 0; i < count; i++) {
-            const isTop = i === count - 1;
+        if (count > shown) {
+            const mark = this.addLabel(colNode, 'Depth', String(count), 22, WALNUT, 48, 28);
+            mark.setPosition(-layout.w / 2 + 22, -h / 2 + 16, 0);
+        }
+
+        for (let i = 0; i < shown; i++) {
+            const isTop = i === shown - 1;
             const y = -h / 2 + layout.trayH / 2 + i * layout.step;
             const tileNode = this.addSprite(
                 colNode,
@@ -2411,10 +2425,11 @@ export class GameController extends Component {
                 layout.trayH,
                 0,
                 y,
-                isTop ? this.trayTint(col[i]) : Color.WHITE,
+                isTop ? this.trayTint(col[count - 1]) : Color.WHITE,
             );
             if (!isTop) continue;
-            const foodSize = this.bagFoodSize(col[i], layout.food);
+            const topKind = col[count - 1];
+            const foodSize = this.bagFoodSize(topKind, layout.food);
             const seatY = Math.round(layout.trayH * -0.04);
             const foodY = seatY + Math.round(foodSize.h * 0.22);
             const foodShadow = new Node('FoodShadow');
@@ -2429,7 +2444,7 @@ export class GameController extends Component {
             const foodNode = this.addSprite(
                 tileNode,
                 'Food',
-                this.frameForFood(col[i]),
+                this.frameForFood(topKind),
                 foodSize.w,
                 foodSize.h,
                 0,
@@ -2500,13 +2515,13 @@ export class GameController extends Component {
     /** 工作台顶面托住叠盘；按设计宽，不再放大出屏。 */
     private drawWorktopBack(root: Node) {
         if (this.worktopTop) {
-            this.addSprite(root, 'WorktopTop', this.worktopTop, 720, 380, 0, -300, Color.WHITE);
+            this.addSprite(root, 'WorktopTop', this.worktopTop, DESIGN_W, 380, 0, -300, Color.WHITE);
             return;
         }
         const top = new Node('WorktopTop');
         top.layer = UI_2D;
         top.setPosition(0, -300, 0);
-        top.addComponent(UITransform).setContentSize(720, 380);
+        top.addComponent(UITransform).setContentSize(DESIGN_W, 380);
         const g = top.addComponent(Graphics);
         g.fillColor = TABLE_TOP;
         g.moveTo(-340, 140);
@@ -2521,7 +2536,7 @@ export class GameController extends Component {
     /** 工作台前立面跟顶面同宽。 */
     private drawWorktopFront(root: Node) {
         if (this.worktopFront) {
-            this.addSprite(root, 'WorktopFront', this.worktopFront, 720, 120, 0, -448, Color.WHITE);
+            this.addSprite(root, 'WorktopFront', this.worktopFront, DESIGN_W, 120, 0, -448, Color.WHITE);
             return;
         }
         const front = new Node('WorktopFront');
@@ -2562,6 +2577,26 @@ export class GameController extends Component {
         if (count === BUF_WELL_XS.length) return BUF_WELL_XS[index];
         const span = BUF_WELL_XS[BUF_WELL_XS.length - 1] - BUF_WELL_XS[0];
         return (index - (count - 1) / 2) * (span / Math.max(count - 1, 1));
+    }
+
+    /** 空槽没有 Sprite 时点击会落到木板图上；垫一层几乎透明的 Graphics 承接触摸。 */
+    private mountBufferSlotHitPad(slot: Node) {
+        const pad = new Node('HitPad');
+        pad.layer = UI_2D;
+        pad.addComponent(UITransform).setContentSize(BUF_SLOT_W, BUF_SLOT_H);
+        const g = pad.addComponent(Graphics);
+        g.fillColor = new Color(255, 253, 248, 4);
+        g.roundRect(-BUF_SLOT_W / 2, -BUF_SLOT_H / 2, BUF_SLOT_W, BUF_SLOT_H, 28);
+        g.fill();
+        slot.addChild(pad);
+        return pad;
+    }
+
+    /** 空槽：提示环/选中呼吸框是 Graphics，会挡 HitPad；把 HitPad 提到最上。有食材时由 Food 接点击。 */
+    private raiseBufferHitPad(slot: Node) {
+        if (slot.getChildByName('Food')) return;
+        const pad = slot.getChildByName('HitPad');
+        if (pad) pad.setSiblingIndex(slot.children.length - 1);
     }
 
     /** 贴住奶油凹盘外沿：槽内暖光 + 珊瑚描边 + 奶色内圈。 */
@@ -2631,6 +2666,7 @@ export class GameController extends Component {
             slotNode.setPosition(this.bufferSlotX(i, n), BUF_WELL_Y, 0);
             slotNode.addComponent(UITransform).setContentSize(BUF_SLOT_W, BUF_SLOT_H);
             wrap.addChild(slotNode);
+            const hitPad = this.mountBufferSlotHitPad(slotNode);
 
             const selected = !!(
                 !board.isWin()
@@ -2667,14 +2703,15 @@ export class GameController extends Component {
             }
 
             const slotIndex = i;
-            slotNode.on(Node.EventType.TOUCH_START, (e: EventTouch) => {
+            hitPad.on(Node.EventType.TOUCH_START, (e: EventTouch) => {
                 const live = this.board;
                 if (!live || live.buffer[slotIndex] == null) return;
                 this.beginFoodPointer(e, { kind: 'buffer', index: slotIndex });
             }, this);
-            slotNode.on(Node.EventType.TOUCH_MOVE, (e: EventTouch) => this.moveFoodPointer(e), this);
-            slotNode.on(Node.EventType.TOUCH_END, (e: EventTouch) => this.endBufferPointer(e, slotIndex), this);
-            slotNode.on(Node.EventType.TOUCH_CANCEL, (e: EventTouch) => this.endBufferPointer(e, slotIndex), this);
+            hitPad.on(Node.EventType.TOUCH_MOVE, (e: EventTouch) => this.moveFoodPointer(e), this);
+            hitPad.on(Node.EventType.TOUCH_END, (e: EventTouch) => this.endBufferPointer(e, slotIndex), this);
+            hitPad.on(Node.EventType.TOUCH_CANCEL, (e: EventTouch) => this.endBufferPointer(e, slotIndex), this);
+            this.raiseBufferHitPad(slotNode);
         }
 
         this.addLabel(plaque, 'BufCount', `柜台 ${filled}/${n}`, 28, MILK, 260, 40);
@@ -2841,7 +2878,6 @@ export class GameController extends Component {
         if (!root) return;
         press.armed = true;
         this.busy = true;
-        playSfx('pickup');
         const hidden = this.sourceFoodNode(press.source);
         press.hidden = hidden;
         let flyW = 72;
@@ -2911,7 +2947,6 @@ export class GameController extends Component {
     }
 
     private snapGhostHome(press: FoodPress, hit: Dest | null) {
-        playSfx('reject');
         const ghost = press.ghost;
         const hidden = press.hidden;
         const token = this.foodPressToken;
@@ -2986,26 +3021,27 @@ export class GameController extends Component {
         sp.color = new Color(c.r, c.g, c.b, 255);
     }
 
-    /** 先柜台、后冰箱。后画的格子盖在上面，从后往前测。 */
+    /** 拖动落点：冰箱优先，再柜台（避免叠盘区误吸到空槽）。 */
     private destAtTouch(e: EventTouch): Dest | null {
         const root = this.playRoot;
         const board = this.board;
         if (!root || !board) return null;
         const screen = e.getLocation();
+        for (let i = board.trays.length - 1; i >= 0; i--) {
+            const tray = this.newestNamed(root, `Tray${i}`);
+            const ui = tray ? tray.getComponent(UITransform) : null;
+            if (ui && ui.hitTest(screen)) return { kind: 'tray', index: i };
+        }
         if (board.bufferEnabled) {
             const wrap = root.getChildByName('BufferBoard');
             if (wrap) {
                 for (let i = board.buffer.length - 1; i >= 0; i--) {
                     const slot = wrap.getChildByName(`Buffer${i}`);
-                    const ui = slot ? slot.getComponent(UITransform) : null;
+                    const pad = slot ? slot.getChildByName('HitPad') : null;
+                    const ui = pad ? pad.getComponent(UITransform) : slot ? slot.getComponent(UITransform) : null;
                     if (ui && ui.hitTest(screen)) return { kind: 'buffer', index: i };
                 }
             }
-        }
-        for (let i = board.trays.length - 1; i >= 0; i--) {
-            const tray = this.newestNamed(root, `Tray${i}`);
-            const ui = tray ? tray.getComponent(UITransform) : null;
-            if (ui && ui.hitTest(screen)) return { kind: 'tray', index: i };
         }
         return null;
     }
@@ -3129,12 +3165,23 @@ export class GameController extends Component {
         return { to, scale: new Vec3(size.w / flyW, size.h / flyH, 1) };
     }
 
+    /** 飞行图 / 拖影 / 落点高亮：盖住冰箱与柜台，仍在 HUD 按钮下面。 */
     private placeBelowHud(node: Node) {
         const root = this.playRoot;
         if (!root || node.parent !== root) return;
         const hud = root.getChildByName('LevelPill');
-        if (!hud) return;
-        node.setSiblingIndex(hud.getSiblingIndex());
+        const buffer = root.getChildByName('BufferBoard');
+        if (hud && buffer) {
+            const hudIdx = hud.getSiblingIndex();
+            const bufIdx = buffer.getSiblingIndex();
+            node.setSiblingIndex(bufIdx >= hudIdx ? bufIdx + 1 : hudIdx);
+            return;
+        }
+        if (hud) {
+            node.setSiblingIndex(hud.getSiblingIndex());
+            return;
+        }
+        node.setSiblingIndex(root.children.length - 1);
     }
 
     private onBagTap(col: number, isTop: boolean) {
@@ -3267,13 +3314,11 @@ export class GameController extends Component {
         const win = board.isWin();
         this.animateDoorIndex = result.sealed && result.dest.kind === 'tray' ? result.dest.index : null;
         this.holdWin = win;
+        this.clearDropHalo();
         this.render();
-        playSfx('place');
+        if (result.dest.kind === 'tray') playFridgeDrop();
         const doorPlayed = result.sealed && result.dest.kind === 'tray' && this.playDoorClose(result.dest.index, win);
-        if (!doorPlayed) {
-            this.animateDoorIndex = null;
-            this.render();
-        }
+        if (!doorPlayed) this.animateDoorIndex = null;
         this.squashLanded(result.dest);
         if (!doorPlayed) this.finishMove(win);
     }
@@ -3309,13 +3354,11 @@ export class GameController extends Component {
         const win = board.isWin();
         this.animateDoorIndex = result.sealed && result.dest.kind === 'tray' ? result.dest.index : null;
         this.holdWin = win;
+        this.clearDropHalo();
         this.render();
-        playSfx('place');
+        if (result.dest.kind === 'tray') playFridgeDrop();
         const doorPlayed = result.sealed && result.dest.kind === 'tray' && this.playDoorClose(result.dest.index, win);
-        if (!doorPlayed) {
-            this.animateDoorIndex = null;
-            this.render();
-        }
+        if (!doorPlayed) this.animateDoorIndex = null;
         this.squashLanded(result.dest);
         if (!doorPlayed) this.finishMove(win);
     }
@@ -3330,7 +3373,7 @@ export class GameController extends Component {
         if (!door || !tray || !doorUi) return false;
         const slotW = doorUi.contentSize.width;
         const slotH = doorUi.contentSize.height;
-        playSfx('door');
+        playTrayDoorClose();
         tween(door)
             .delay(DOOR_SEC * 0.8)
             .call(() => {
@@ -3342,7 +3385,6 @@ export class GameController extends Component {
             .call(() => {
                 this.animateDoorIndex = null;
                 if (door.isValid) {
-                    playSfx('latch');
                     this.spawnSeamPuff(door, slotW, slotH);
                 }
                 this.bounceNode(tray);
@@ -3430,7 +3472,7 @@ export class GameController extends Component {
 
     private finishMove(win: boolean) {
         if (win) {
-            this.scheduleOnce(() => this.playWinReward(), WIN_DELAY);
+            this.scheduleOnce(() => this.playWinReward(), SETTLE_DELAY);
             return;
         }
         this.holdWin = false;
@@ -3442,6 +3484,7 @@ export class GameController extends Component {
             return;
         }
         this.busy = false;
+        this.swallowedTouch = -2;
         this.playSizeFeedback();
     }
 
@@ -3456,7 +3499,10 @@ export class GameController extends Component {
         }
         this.levelFailed = true;
         this.busy = true;
-        this.flashFail(reason, () => this.spawnFailCard(reason));
+        this.scheduleOnce(() => {
+            playSfx('game_failed');
+            this.flashFail(reason, () => this.spawnFailCard(reason));
+        }, SETTLE_DELAY);
     }
 
     private flashFail(reason: FailReason, done: () => void) {
@@ -3621,6 +3667,7 @@ export class GameController extends Component {
             return;
         }
         this.holdWin = true;
+        playSfx('win_tg');
         const prevCleared = this.clearedId();
         const trayKinds = board.trays.map((tray) => tray.kind);
         const recorded = noteAlbumWin(
@@ -3635,27 +3682,25 @@ export class GameController extends Component {
         this.pulseSealedFridge(root);
         this.spawnPrideFlash(root);
 
-        this.scheduleOnce(() => {
-            const size = this.canvasSize();
-            const dim = this.addSprite(
-                root,
-                'WinDim',
-                this.builtin,
-                size.w,
-                size.h,
-                0,
-                0,
-                new Color(48, 48, 48, 255),
-            );
-            const dimOp = dim.addComponent(UIOpacity);
-            dimOp.opacity = 0;
-            tween(dimOp).to(0.4, { opacity: 178 }, { easing: easing.quadOut }).start();
-        }, 0.42);
+        const size = this.canvasSize();
+        const dim = this.addSprite(
+            root,
+            'WinDim',
+            this.builtin,
+            size.w,
+            size.h,
+            0,
+            0,
+            new Color(48, 48, 48, 255),
+        );
+        const dimOp = dim.addComponent(UIOpacity);
+        dimOp.opacity = 0;
+        tween(dimOp).to(0.4, { opacity: 178 }, { easing: easing.quadOut }).start();
 
         this.scheduleOnce(() => {
             this.spawnWinCard(root, board.steps, recorded.firstClear);
             this.busy = false;
-        }, 0.62);
+        }, 0.08);
     }
 
     private pulseSealedFridge(root: Node) {
@@ -3743,7 +3788,7 @@ export class GameController extends Component {
     }
 
     private spawnPrideFlash(root: Node) {
-        const coral = this.addSprite(root, 'PrideFlashCoral', this.builtin, 720, 1280, 0, 0, CORAL);
+        const coral = this.addSprite(root, 'PrideFlashCoral', this.builtin, DESIGN_W, DESIGN_H, 0, 0, CORAL);
         const coralOp = coral.addComponent(UIOpacity);
         coralOp.opacity = 0;
         tween(coralOp)
@@ -3753,7 +3798,7 @@ export class GameController extends Component {
                 if (coral.isValid) coral.destroy();
             })
             .start();
-        const flash = this.addSprite(root, 'PrideFlash', this.builtin, 720, 1280, 0, 0, MILK);
+        const flash = this.addSprite(root, 'PrideFlash', this.builtin, DESIGN_W, DESIGN_H, 0, 0, MILK);
         const op = flash.addComponent(UIOpacity);
         op.opacity = 0;
         tween(op)
@@ -3853,7 +3898,8 @@ export class GameController extends Component {
         const emphasizeShare = levelId === 25 || levelId === 30;
         const nextY = emphasizeShare ? -268 : -168;
         const shareY = emphasizeShare ? -168 : -268;
-        const nextLabel = levelId === 30 ? '回主页' : '下一关  >';
+        const lastId = PLAYABLE[PLAYABLE.length - 1].id;
+        const nextLabel = levelId === lastId ? '回主页' : '下一关  >';
         const nextBtn = this.makeWinPrimaryBtn(card, 'BtnNext', nextLabel, 0, nextY);
         nextBtn.setScale(0, 0, 1);
         const shareBtn = this.makeWinSecondaryBtn(card, 'BtnShareSteps', '分享步数', 0, shareY);
@@ -3933,7 +3979,7 @@ export class GameController extends Component {
 
         const fromId = this.board ? this.board.level.id : 1;
         this.bindHudPress(nextBtn, () => {
-            if (fromId >= 30) {
+            if (fromId >= PLAYABLE[PLAYABLE.length - 1].id) {
                 this.goHome();
                 return;
             }
@@ -4237,6 +4283,7 @@ export class GameController extends Component {
             const slot = wrap.getChildByName(`Buffer${i}`);
             if (!slot) continue;
             this.drawSageDashedRing(slot, BUF_SLOT_W, BUF_SLOT_H, 28, 'HintRing');
+            this.raiseBufferHitPad(slot);
         }
     }
 
@@ -4357,6 +4404,7 @@ export class GameController extends Component {
             const op = flash.addComponent(UIOpacity);
             op.opacity = 0;
             slot.addChild(flash);
+            this.raiseBufferHitPad(slot);
             tween(op)
                 .to(0.1, { opacity: 255 })
                 .to(0.16, { opacity: 80 })
@@ -4364,6 +4412,7 @@ export class GameController extends Component {
                 .to(0.2, { opacity: 0 })
                 .call(() => {
                     if (flash.isValid) flash.destroy();
+                    if (slot.isValid) this.raiseBufferHitPad(slot);
                 })
                 .start();
         }

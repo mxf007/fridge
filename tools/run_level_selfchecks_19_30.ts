@@ -28,6 +28,16 @@ import { selfCheckLevel27 } from '../assets/scripts/game/level_27';
 import { selfCheckLevel28 } from '../assets/scripts/game/level_28';
 import { selfCheckLevel29 } from '../assets/scripts/game/level_29';
 import { selfCheckLevel30 } from '../assets/scripts/game/level_30';
+import { selfCheckLevel31 } from '../assets/scripts/game/level_31';
+import { selfCheckLevel32 } from '../assets/scripts/game/level_32';
+import { selfCheckLevel33 } from '../assets/scripts/game/level_33';
+import { selfCheckLevel34 } from '../assets/scripts/game/level_34';
+import { selfCheckLevel35 } from '../assets/scripts/game/level_35';
+import { selfCheckLevel36 } from '../assets/scripts/game/level_36';
+import { selfCheckLevel37 } from '../assets/scripts/game/level_37';
+import { selfCheckLevel38 } from '../assets/scripts/game/level_38';
+import { selfCheckLevel39 } from '../assets/scripts/game/level_39';
+import { selfCheckLevel40 } from '../assets/scripts/game/level_40';
 import { selfCheckVisibleInformationAudit } from '../assets/scripts/game/VisibleInformationAudit.test';
 import { assertConsecutiveTrayGrids, assertTrayGrid } from '../assets/scripts/game/levelLayout';
 import { LEVEL_01 } from '../assets/scripts/game/level_01';
@@ -60,6 +70,16 @@ import { LEVEL_27 } from '../assets/scripts/game/level_27';
 import { LEVEL_28 } from '../assets/scripts/game/level_28';
 import { LEVEL_29 } from '../assets/scripts/game/level_29';
 import { LEVEL_30 } from '../assets/scripts/game/level_30';
+import { LEVEL_31 } from '../assets/scripts/game/level_31';
+import { LEVEL_32 } from '../assets/scripts/game/level_32';
+import { LEVEL_33 } from '../assets/scripts/game/level_33';
+import { LEVEL_34 } from '../assets/scripts/game/level_34';
+import { LEVEL_35 } from '../assets/scripts/game/level_35';
+import { LEVEL_36 } from '../assets/scripts/game/level_36';
+import { LEVEL_37 } from '../assets/scripts/game/level_37';
+import { LEVEL_38 } from '../assets/scripts/game/level_38';
+import { LEVEL_39 } from '../assets/scripts/game/level_39';
+import { LEVEL_40 } from '../assets/scripts/game/level_40';
 
 const checks = [
     selfCheckLevel01,
@@ -92,6 +112,16 @@ const checks = [
     selfCheckLevel28,
     selfCheckLevel29,
     selfCheckLevel30,
+    selfCheckLevel31,
+    selfCheckLevel32,
+    selfCheckLevel33,
+    selfCheckLevel34,
+    selfCheckLevel35,
+    selfCheckLevel36,
+    selfCheckLevel37,
+    selfCheckLevel38,
+    selfCheckLevel39,
+    selfCheckLevel40,
     selfCheckVisibleInformationAudit,
 ];
 
@@ -103,6 +133,16 @@ const trayLevels = [
     LEVEL_01, LEVEL_02, LEVEL_03, LEVEL_04, LEVEL_05, LEVEL_06, LEVEL_07, LEVEL_08, LEVEL_09, LEVEL_10,
     LEVEL_11, LEVEL_12, LEVEL_13, LEVEL_14, LEVEL_15, LEVEL_16, LEVEL_17, LEVEL_18, LEVEL_19, LEVEL_20,
     LEVEL_21, LEVEL_22, LEVEL_23, LEVEL_24, LEVEL_25, LEVEL_26, LEVEL_27, LEVEL_28, LEVEL_29, LEVEL_30,
+    LEVEL_31,
+    LEVEL_32,
+    LEVEL_33,
+    LEVEL_34,
+    LEVEL_35,
+    LEVEL_36,
+    LEVEL_37,
+    LEVEL_38,
+    LEVEL_39,
+    LEVEL_40,
 ];
 const trayCaps: { id: number; caps: number[] }[] = [];
 for (let i = 0; i < trayLevels.length; i++) {
@@ -113,4 +153,4 @@ for (let i = 0; i < trayLevels.length; i++) {
     trayCaps.push({ id: level.id, caps });
 }
 assertConsecutiveTrayGrids(trayCaps);
-console.log('L1–L30 selfCheck batch OK');
+console.log('L1–L40 selfCheck batch OK');

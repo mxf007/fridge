@@ -3,16 +3,18 @@ import type { LevelDef } from './types';
 
 export type ScriptStep = { tray?: number; buffer?: number; bag?: number; fromBuffer?: number };
 
-/** 第 7–30 关叠放：连续相同 ≤2；深列至少两种。10 关起无单层列，13 关起每列至少 3 层。 */
+/** 第 7–30 关叠放：连续相同 ≤2；深列至少两种。10 关起无单层列，13 关起每列至少 3 层。31 关起每列至少 4 层，且同列相邻相同比例 ≤ 30%。 */
 export function assertRedoLayout(level: LevelDef): void {
     if (level.id < 7) return;
     for (let c = 0; c < level.bags.length; c++) {
         const col = level.bags[c];
         let runKind = '';
         let run = 0;
+        let sameNeighbors = 0;
         const kinds: Record<string, true> = {};
         for (let i = 0; i < col.length; i++) {
             kinds[col[i]] = true;
+            if (i > 0 && col[i] === col[i - 1]) sameNeighbors += 1;
             if (col[i] === runKind) {
                 run += 1;
                 if (run >= 3) throw new Error(`L${level.id} bag ${c} repeats ${col[i]}`);
@@ -24,8 +26,13 @@ export function assertRedoLayout(level: LevelDef): void {
         if (col.length >= 2 && Object.keys(kinds).length < 2) {
             throw new Error(`L${level.id} bag ${c} needs two kinds`);
         }
+        if (level.id >= 31 && col.length > 1) {
+            const rate = sameNeighbors / (col.length - 1);
+            if (rate > 0.3) throw new Error(`L${level.id} bag ${c} pair rate ${rate}`);
+        }
         if (level.id >= 10 && col.length < 2) throw new Error(`L${level.id} bag ${c} depth`);
         if (level.id >= 13 && col.length < 3) throw new Error(`L${level.id} bag ${c} depth < 3`);
+        if (level.id >= 31 && col.length < 4) throw new Error(`L${level.id} bag ${c} depth < 4`);
     }
 }
 
@@ -172,6 +179,205 @@ function traySlots(levelId: number): { cols: number; rows: number; slots: TraySl
             cols: 8,
             rows: 6,
             slots: [laid(3, 0, 0), laid(3, 3, 0), laid(2, 6, 0), upright(4, 0, 2), upright(4, 2, 2), upright(4, 4, 2)],
+        };
+    }
+    if (levelId === 31) {
+        return {
+            cols: 8,
+            rows: 6,
+            slots: [laid(5, 0, 0), laid(3, 5, 0), laid(4, 0, 2), laid(4, 4, 2), laid(4, 0, 4)],
+        };
+    }
+    if (levelId === 32) {
+        return {
+            cols: 8,
+            rows: 6,
+            slots: [laid(2, 1, 0), laid(2, 5, 0), laid(4, 0, 2), laid(4, 4, 2), laid(4, 0, 4), laid(4, 4, 4)],
+        };
+    }
+    if (levelId === 33) {
+        return {
+            cols: 8,
+            rows: 6,
+            slots: [
+                upright(4, 0, 1),
+                upright(4, 6, 1),
+                upright(3, 2, 0),
+                upright(3, 4, 0),
+                upright(3, 2, 3),
+                upright(3, 4, 3),
+            ],
+        };
+    }
+    if (levelId === 34) {
+        return {
+            cols: 8,
+            rows: 6,
+            slots: [
+                laid(5, 0, 0),
+                laid(3, 5, 0),
+                laid(4, 0, 2),
+                laid(4, 4, 2),
+                laid(2, 1, 4),
+                laid(2, 5, 4),
+            ],
+        };
+    }
+    if (levelId === 35) {
+        return {
+            cols: 8,
+            rows: 6,
+            slots: [
+                laid(4, 0, 0),
+                laid(4, 4, 0),
+                laid(4, 0, 2),
+                laid(3, 4, 2),
+                laid(3, 0, 4),
+                laid(2, 5, 4),
+            ],
+        };
+    }
+    if (levelId === 36) {
+        return {
+            cols: 8,
+            rows: 6,
+            slots: [
+                laid(5, 1, 4),
+                laid(4, 0, 0),
+                laid(4, 4, 0),
+                laid(3, 0, 2),
+                laid(3, 4, 2),
+                laid(2, 6, 4),
+            ],
+        };
+    }
+    if (levelId === 37) {
+        return {
+            cols: 8,
+            rows: 6,
+            slots: [
+                laid(4, 0, 0),
+                laid(4, 4, 0),
+                laid(4, 0, 2),
+                laid(4, 4, 2),
+                laid(3, 2, 4),
+                laid(2, 6, 4),
+            ],
+        };
+    }
+    if (levelId === 38) {
+        return {
+            cols: 8,
+            rows: 6,
+            slots: [
+                laid(5, 0, 0),
+                laid(4, 0, 2),
+                laid(4, 4, 2),
+                laid(4, 2, 4),
+                laid(2, 0, 4),
+                laid(2, 6, 4),
+            ],
+        };
+    }
+    if (levelId === 39) {
+        return {
+            cols: 8,
+            rows: 6,
+            slots: [
+                laid(4, 0, 0),
+                laid(4, 4, 0),
+                laid(4, 0, 4),
+                laid(3, 0, 2),
+                laid(3, 4, 2),
+                laid(3, 5, 4),
+            ],
+        };
+    }
+    if (levelId === 40) {
+        return {
+            cols: 8,
+            rows: 6,
+            slots: [
+                laid(5, 0, 0),
+                laid(2, 6, 0),
+                laid(4, 0, 2),
+                laid(4, 4, 2),
+                laid(3, 0, 4),
+                laid(3, 4, 4),
+            ],
+        };
+    }
+    if (levelId === 41) {
+        return {
+            cols: 8,
+            rows: 6,
+            slots: [
+                laid(5, 0, 0),
+                laid(5, 0, 2),
+                laid(4, 0, 4),
+                laid(4, 4, 4),
+                laid(3, 5, 0),
+                laid(3, 5, 2),
+            ],
+        };
+    }
+    if (levelId === 42) {
+        return {
+            cols: 8,
+            rows: 6,
+            slots: [
+                laid(5, 0, 0),
+                laid(3, 5, 0),
+                laid(4, 0, 2),
+                laid(4, 4, 2),
+                laid(4, 0, 4),
+                laid(4, 4, 4),
+            ],
+        };
+    }
+    if (levelId === 43) {
+        return {
+            cols: 8,
+            rows: 6,
+            slots: [
+                laid(4, 0, 0),
+                laid(4, 4, 0),
+                laid(4, 0, 2),
+                laid(4, 4, 2),
+                laid(4, 2, 4),
+                laid(2, 0, 4),
+                laid(2, 6, 4),
+            ],
+        };
+    }
+    if (levelId === 44) {
+        return {
+            cols: 8,
+            rows: 6,
+            slots: [
+                laid(5, 0, 0),
+                laid(3, 5, 0),
+                laid(4, 0, 2),
+                laid(4, 4, 2),
+                laid(4, 0, 4),
+                laid(2, 4, 4),
+                laid(2, 6, 4),
+            ],
+        };
+    }
+    if (levelId === 45) {
+        return {
+            cols: 8,
+            rows: 6,
+            slots: [
+                laid(4, 0, 0),
+                laid(4, 4, 0),
+                laid(4, 0, 2),
+                laid(4, 4, 2),
+                laid(3, 0, 4),
+                laid(3, 5, 4),
+                laid(2, 3, 4),
+            ],
         };
     }
     if (levelId === 13 || levelId === 24) {

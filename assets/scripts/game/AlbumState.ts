@@ -69,7 +69,7 @@ export function kindsFromLevel(level: LevelDef): (FoodId | null)[] {
 }
 
 export function migrateAlbum(file: AlbumFile, cleared: number, levelById: (id: number) => LevelDef | null): void {
-    const n = cleared > 30 ? 30 : cleared;
+    const n = cleared > 50 ? 50 : cleared;
     for (let id = 1; id <= n; id++) {
         const key = String(id);
         if (file.entries[key]) continue;

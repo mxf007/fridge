@@ -34,6 +34,7 @@ import type { AlbumGrade } from './game/AlbumState';
 import type { AlbumEntry } from './game/AlbumState';
 import type { Dest, FailReason, FoodId, HintPick, LevelDef, PlaceFail, PlaceReason } from './game/types';
 import { FOOD_NAMES } from './game/types';
+import { openMergeGame } from './merge/MergeGameController';
 
 const { ccclass, property } = _decorator;
 
@@ -72,8 +73,10 @@ const BUF_WELL_Y = 16;
 const BUF_WELL_XS = [-198, 0, 194];
 const TRAY_FOOD_W = 46;
 const TRAY_FOOD_H = 70;
-/** food_milk_slot.png 的宽高比。冰箱槽位按这张扁盒画。 */
+/** food_milk_slot.png 宽高比。仅竖格（upright）冰箱内牛奶用这张扁盒。 */
 const SLOT_MILK_ASPECT = 254 / 203;
+/** 购物袋 / 横格冰箱内 food_milk 高盒，宽÷高。 */
+const PLATE_MILK_ASPECT = 0.575;
 const TRAY_FOOD_GAP = 4;
 const FLY_SEC = 0.22;
 const DOOR_SEC = 0.28;
@@ -139,7 +142,7 @@ const UUID = {
     builtin: '20835ba4-6145-4fbc-a58a-051ce700aa3e@f9941',
 };
 
-const HOME_NODES = ['Bg', 'Title', 'BtnStart', 'AlbumLink', 'HomeBarMask'];
+const HOME_NODES = ['Bg', 'Title', 'BtnStart', 'MergeEntry', 'AlbumLink', 'HomeBarMask'];
 const CLEARED_KEY = 'fridge_cleared';
 const MILESTONE_KEY = (n: number) => `fridge_milestone_${n}`;
 const MILESTONE_NS = [10, 20, 30];
@@ -353,12 +356,70 @@ export class GameController extends Component {
                 this.openAlbum();
             }, this);
         }
+        this.ensureMergeEntry();
         this.polishHomeChrome();
         this.refreshAlbumLink();
     }
 
-    /** §6.1：主页叠在 bg_home 成品图上——开始/图鉴热区。 */
+    /** 主页地板上的合合乐入口（西瓜图），不放底栏文案按钮。 */
+    private ensureMergeEntry() {
+        let entry = this.node.getChildByName('MergeEntry');
+        if (!entry) {
+            entry = new Node('MergeEntry');
+            entry.layer = UI_2D;
+            entry.addComponent(UITransform).setContentSize(128, 128);
+            entry.addComponent(Sprite);
+            this.node.addChild(entry);
+        }
+        // 清掉旧版底栏胶囊按钮残留
+        const oldLabel = entry.getChildByName('Label');
+        if (oldLabel) oldLabel.destroy();
+        const oldGfx = entry.getComponent(Graphics);
+        if (oldGfx) oldGfx.destroy();
+
+        const ui = entry.getComponent(UITransform) ?? entry.addComponent(UITransform);
+        ui.setContentSize(128, 128);
+        let sp = entry.getComponent(Sprite);
+        if (!sp) sp = entry.addComponent(Sprite);
+        sp.sizeMode = Sprite.SizeMode.CUSTOM;
+        if (this.foodWatermelon) sp.spriteFrame = this.foodWatermelon;
+        else {
+            void this.loadSlot(this.foodWatermelon, UUID.foodWatermelon, (frame) => {
+                this.foodWatermelon = frame;
+                if (entry?.isValid) {
+                    const s = entry.getComponent(Sprite);
+                    if (s) s.spriteFrame = frame;
+                }
+            });
+        }
+
+        if (!entry.getComponent(Button)) entry.addComponent(Button);
+        entry.off(Node.EventType.TOUCH_END);
+        entry.on(Node.EventType.TOUCH_END, () => {
+            playBtnClick();
+            for (let i = 0; i < HOME_NODES.length; i++) {
+                const homeNode = this.node.getChildByName(HOME_NODES[i]);
+                if (homeNode) homeNode.active = false;
+            }
+            openMergeGame(this.node, () => {
+                for (let i = 0; i < HOME_NODES.length; i++) {
+                    const homeNode = this.node.getChildByName(HOME_NODES[i]);
+                    if (homeNode) homeNode.active = HOME_NODES[i] !== 'Title';
+                }
+                this.polishHomeChrome();
+                this.refreshAlbumLink();
+            });
+        }, this);
+        return entry;
+    }
+
+    /** §6.1：主页叠在 bg_home 成品图上——开始/图鉴热区；合合乐在冰箱左下地板。 */
     private polishHomeChrome() {
+        const mergeEntry = this.ensureMergeEntry();
+        // 红框：冰箱底座左侧地板
+        mergeEntry.setPosition(-150, -210, 0);
+        const bg = this.node.getChildByName('Bg');
+        if (bg) mergeEntry.setSiblingIndex(bg.getSiblingIndex() + 1);
         const btn = this.node.getChildByName('BtnStart');
         if (btn) {
             const sp = btn.getComponent(Sprite);
@@ -380,7 +441,7 @@ export class GameController extends Component {
                 label.color = SAGE;
                 label.fontSize = 28;
             }
-            album.setPosition(0, -560, 0);
+            album.setPosition(0, -545, 0);
             const ui = album.getComponent(UITransform);
             if (ui) ui.setContentSize(640, 56);
             if (label) {
@@ -832,18 +893,13 @@ export class GameController extends Component {
                 frame.addChild(door);
             }
             const kind = kinds[i] || null;
-            const food = kind ? this.frameForFood(kind) : null;
-            if (food) {
-                let foodH = Math.max(10, doorH * 0.62);
-                let foodW = foodH * 0.66;
-                let foodX = -doorW * 0.08;
-                if (!cell.horizontal && kind === 'milk') {
-                    const aspect = 0.575;
-                    foodW = Math.min(doorH * 0.62 * aspect, doorW * 0.72);
-                    foodH = foodW / aspect;
-                    foodX = 0;
+            if (kind) {
+                const food =
+                    kind === 'milk' ? this.trayMilkFrame(cell.horizontal) : this.frameForFood(kind);
+                if (food) {
+                    const box = this.milkThumbInDoor(kind, cell.horizontal, doorW, doorH);
+                    this.addSprite(frame, 'Food', food, box.w, box.h, box.x, 0, Color.WHITE);
                 }
-                this.addSprite(frame, 'Food', food, foodW, foodH, foodX, 0, Color.WHITE);
             }
         }
     }
@@ -2200,7 +2256,7 @@ export class GameController extends Component {
         for (let k = 0; k < items.length; k++) {
             const seat = this.seatBox(slotW, slotH, cap, k, horizontal);
             const size = this.trayItemDrawSize(items[k], horizontal, seat);
-            const frame = items[k] === 'milk' ? this.trayMilkFrame() : this.frameForFood(items[k]);
+            const frame = items[k] === 'milk' ? this.trayMilkFrame(horizontal) : this.frameForFood(items[k]);
             this.addSprite(
                 node,
                 `Food${k}`,
@@ -2214,18 +2270,24 @@ export class GameController extends Component {
         }
     }
 
-    /** 冰箱里的牛奶用扁盒图，按图的宽高比塞进座位。 */
+    /** 竖格用扁盒 slot；横格与购物袋同一套高盒（UI §5 横格牛奶不缩放变形）。 */
     private trayItemDrawSize(
         item: FoodId,
-        _horizontal: boolean,
+        horizontal: boolean,
         seat: { w: number; h: number },
     ): { w: number; h: number } {
-        if (item === 'milk') return this.fitMilkInSeat(seat);
+        if (item === 'milk') {
+            if (horizontal) {
+                const plate = this.plateFoodSize('milk');
+                return this.fitAspect(plate.w / plate.h, seat.w * 0.82, seat.h * 0.82);
+            }
+            return this.fitMilkInSeat(seat);
+        }
         const food = Math.min(seat.w, seat.h) * 0.82;
         return { w: food, h: food };
     }
 
-    /** 扁盒宽高比约 1.25。图没载入时退回高盒比例，避免把盘子图拉宽。 */
+    /** 竖格扁盒宽高比约 1.25。图没载入时退回高盒比例，避免把盘子图拉宽。 */
     private fitMilkInSeat(seat: { w: number; h: number }): { w: number; h: number } {
         const aspect = this.foodMilkSlot ? SLOT_MILK_ASPECT : 0.575;
         return this.fitAspect(aspect, seat.w * 0.82, seat.h * 0.82);
@@ -2241,9 +2303,35 @@ export class GameController extends Component {
         return { w, h };
     }
 
-    /** 槽位牛奶。图还没载入时先用盘子上的高盒。 */
-    private trayMilkFrame(): SpriteFrame | null {
+    /** 横屉高盒；竖格扁盒 slot。图还没载入时退回 foodMilk。 */
+    private trayMilkFrame(horizontal: boolean): SpriteFrame | null {
+        if (horizontal) return this.foodMilk;
         return this.foodMilkSlot || this.foodMilk;
+    }
+
+    private milkUsesSlotInTray(horizontal: boolean): boolean {
+        return !horizontal;
+    }
+
+    /** 图鉴门心与对局同一套：横格高盒、竖格扁盒；其它食材按门区比例。 */
+    private milkThumbInDoor(
+        kind: FoodId,
+        horizontal: boolean,
+        doorW: number,
+        doorH: number,
+    ): { w: number; h: number; x: number } {
+        if (kind !== 'milk') {
+            const foodH = Math.max(10, doorH * 0.62);
+            return { w: foodH * 0.66, h: foodH, x: -doorW * 0.08 };
+        }
+        const maxW = doorW * 0.72;
+        const maxH = doorH * 0.62;
+        if (horizontal) {
+            const fitted = this.fitAspect(PLATE_MILK_ASPECT, maxW, maxH);
+            return { w: fitted.w, h: fitted.h, x: 0 };
+        }
+        const fitted = this.fitMilkInSeat({ w: maxW / 0.82, h: maxH / 0.82 });
+        return { w: fitted.w, h: fitted.h, x: 0 };
     }
 
     /** 和当前这一排盘子上的食材同一套宽高。 */
@@ -2955,16 +3043,19 @@ export class GameController extends Component {
         const ghost = press.ghost;
         const flyer = press.flyer;
         const token = this.foodPressToken;
-        if (press.item === 'milk' && dest.kind === 'tray' && this.foodMilkSlot && flyer) {
-            const sp = flyer.getComponent(Sprite);
-            const flyerUi = flyer.getComponent(UITransform);
-            if (sp && flyerUi) {
-                sp.spriteFrame = this.foodMilkSlot;
-                const box = this.fitMilkInSeat({ w: press.flyW / 0.82, h: press.flyH / 0.82 });
-                flyerUi.setContentSize(box.w, box.h);
-                flyer.setScale(1, 1, 1);
-                press.flyW = box.w;
-                press.flyH = box.h;
+        if (press.item === 'milk' && dest.kind === 'tray' && flyer) {
+            const m = this.trayAt(dest.index);
+            if (this.milkUsesSlotInTray(m.horizontal) && this.foodMilkSlot) {
+                const sp = flyer.getComponent(Sprite);
+                const flyerUi = flyer.getComponent(UITransform);
+                if (sp && flyerUi) {
+                    sp.spriteFrame = this.foodMilkSlot;
+                    const box = this.fitMilkInSeat({ w: press.flyW / 0.82, h: press.flyH / 0.82 });
+                    flyerUi.setContentSize(box.w, box.h);
+                    flyer.setScale(1, 1, 1);
+                    press.flyW = box.w;
+                    press.flyH = box.h;
+                }
             }
         }
         const landing = this.placeLanding(press.item, dest, press.flyW, press.flyH);
@@ -3265,8 +3356,11 @@ export class GameController extends Component {
             flyW = 96;
             flyH = 96;
         }
-        const slotMilk = item === 'milk' && !toBuffer && this.foodMilkSlot;
-        if (slotMilk) {
+        let useSlotMilk = false;
+        if (item === 'milk' && !toBuffer && board.dest?.kind === 'tray') {
+            useSlotMilk = this.milkUsesSlotInTray(this.trayAt(board.dest.index).horizontal);
+        }
+        if (useSlotMilk && this.foodMilkSlot) {
             const box = this.fitMilkInSeat({ w: flyW / 0.82, h: flyH / 0.82 });
             flyW = box.w;
             flyH = box.h;
@@ -3277,7 +3371,8 @@ export class GameController extends Component {
             return;
         }
 
-        const flyFrame = slotMilk ? this.foodMilkSlot : this.frameForFood(item);
+        const flyFrame =
+            useSlotMilk && this.foodMilkSlot ? this.foodMilkSlot : this.frameForFood(item);
         const flyer = this.addSprite(root, 'Flyer', flyFrame, flyW, flyH, from.x, from.y, Color.WHITE);
         this.placeBelowHud(flyer);
         tween(flyer)
@@ -3326,11 +3421,15 @@ export class GameController extends Component {
         const seat = this.seatBox(m.slotW, m.slotH, cap, nextCount, m.horizontal);
         const toWorld = trayNode.getComponent(UITransform)!.convertToWorldSpaceAR(new Vec3(seat.x, seat.y, 0));
         const to = ui.convertToNodeSpaceAR(toWorld);
-        const slotMilk = item === 'milk' && this.foodMilkSlot;
-        const start = slotMilk
-            ? this.fitMilkInSeat({ w: 64 / 0.82, h: 96 / 0.82 })
-            : { w: 64, h: 96 };
-        const flyFrame = slotMilk ? this.foodMilkSlot : this.frameForFood(item);
+        const useSlotMilk = item === 'milk' && this.milkUsesSlotInTray(m.horizontal);
+        const start =
+            useSlotMilk && this.foodMilkSlot
+                ? this.fitMilkInSeat({ w: 64 / 0.82, h: 96 / 0.82 })
+                : item === 'milk'
+                  ? this.plateFoodSize('milk')
+                  : { w: 64, h: 96 };
+        const flyFrame =
+            useSlotMilk && this.foodMilkSlot ? this.foodMilkSlot : this.frameForFood(item);
         const flyer = this.addSprite(root, 'Flyer', flyFrame, start.w, start.h, from.x, from.y, Color.WHITE);
         this.placeBelowHud(flyer);
         const fitted = this.trayFoodSize(m.slotH, board.trays[destIndex].cap);

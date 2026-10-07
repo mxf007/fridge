@@ -1,0 +1,39 @@
+﻿node.exe : npm warn Unknown env config "devdir". This will stop working in the next major version of npm. See `npm help
+ npmrc` for supported config options.
+所在位置 行:1 字符: 1
++ & "C:\Program Files\nodejs/node.exe" "C:\Program Files\nodejs/node_mo ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (npm warn Unknow...config options.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+L19 minBufferUsed 0
+L19 audit variants 15 safe 1
+L20 OK 1260
+L21 OK 35
+L22 minBufferUsed 0
+L22 audit variants 420 safe 1
+L23 OK 60
+L24 OK 20 locked_out
+L25 OK 3150
+L26 OK 1680 buffer_full
+L27 OK 15 locked_out
+L28 OK 35
+L29 OK 1260
+F:\fridge\assets\scripts\game\level_30.ts:70
+    if (!audit.passes) throw new Error(`L30 audit failed: ${audit.failures.join(',')}`);
+                             ^
+
+Error: L30 audit failed: audit_budget_exceeded,forced_guess
+    at Array.selfCheckLevel30 (F:\fridge\assets\scripts\game\level_30.ts:70:30)
+    at <anonymous> (F:\fridge\tools\run_level_selfchecks_19_30.ts:30:13)
+    at Object.<anonymous> (F:\fridge\tools\run_level_selfchecks_19_30.ts:32:41)
+    at Module._compile (node:internal/modules/cjs/loader:1812:14)
+    at Object.transformer (C:\Users\ADMINI~1\AppData\Local\Temp\cursor-sandbox-cache\dba1c149a2df0ebb6af6c9a4e105e12d\n
+pm\_npx\fd45a72a545557e9\node_modules\tsx\dist\register-B1c7OH6V.cjs:22:2188)
+    at Module.load (node:internal/modules/cjs/loader:1533:32)
+    at Module._load (node:internal/modules/cjs/loader:1335:12)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)
+    at loadCJSModuleWithModuleLoad (node:internal/modules/esm/translators:328:3)
+    at ModuleWrap.<anonymous> (node:internal/modules/esm/translators:233:7)
+
+Node.js v24.14.1

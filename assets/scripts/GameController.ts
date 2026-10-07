@@ -142,7 +142,11 @@ const UUID = {
     builtin: '20835ba4-6145-4fbc-a58a-051ce700aa3e@f9941',
 };
 
-const HOME_NODES = ['Bg', 'Title', 'BtnStart', 'MergeEntry', 'AlbumLink', 'HomeBarMask'];
+const HOME_NODES = ['Bg', 'Title', 'BtnStart', 'MergeHomeBtn', 'AlbumLink', 'HomeBarMask', 'HomeBtnCover'];
+/** 主页三颗按钮同一尺寸。奶油卡片放得下三颗 420×84，间距 16。 */
+const HOME_BTN_W = 420;
+const HOME_BTN_H = 84;
+const HOME_BTN_GAP = 16;
 const CLEARED_KEY = 'fridge_cleared';
 const MILESTONE_KEY = (n: number) => `fridge_milestone_${n}`;
 const MILESTONE_NS = [10, 20, 30];
@@ -356,46 +360,34 @@ export class GameController extends Component {
                 this.openAlbum();
             }, this);
         }
-        this.ensureMergeEntry();
         this.polishHomeChrome();
         this.refreshAlbumLink();
     }
 
-    /** 主页地板上的合合乐入口（西瓜图），不放底栏文案按钮。 */
-    private ensureMergeEntry() {
-        let entry = this.node.getChildByName('MergeEntry');
-        if (!entry) {
-            entry = new Node('MergeEntry');
-            entry.layer = UI_2D;
-            entry.addComponent(UITransform).setContentSize(128, 128);
-            entry.addComponent(Sprite);
-            this.node.addChild(entry);
+    /** 主页「今晚大果盘」。地板上的西瓜图不再作为入口。 */
+    private ensureMergeHomeBtn(): Node {
+        const old = this.node.getChildByName('MergeEntry');
+        if (old) old.destroy();
+        let btn = this.node.getChildByName('MergeHomeBtn');
+        if (!btn) {
+            btn = new Node('MergeHomeBtn');
+            btn.layer = UI_2D;
+            this.node.addChild(btn);
         }
-        // 清掉旧版底栏胶囊按钮残留
-        const oldLabel = entry.getChildByName('Label');
-        if (oldLabel) oldLabel.destroy();
-        const oldGfx = entry.getComponent(Graphics);
-        if (oldGfx) oldGfx.destroy();
-
-        const ui = entry.getComponent(UITransform) ?? entry.addComponent(UITransform);
-        ui.setContentSize(128, 128);
-        let sp = entry.getComponent(Sprite);
-        if (!sp) sp = entry.addComponent(Sprite);
-        sp.sizeMode = Sprite.SizeMode.CUSTOM;
-        if (this.foodWatermelon) sp.spriteFrame = this.foodWatermelon;
-        else {
-            void this.loadSlot(this.foodWatermelon, UUID.foodWatermelon, (frame) => {
-                this.foodWatermelon = frame;
-                if (entry?.isValid) {
-                    const s = entry.getComponent(Sprite);
-                    if (s) s.spriteFrame = frame;
-                }
-            });
+        this.paintHomePill(btn, HOME_BTN_W, HOME_BTN_H, SAGE);
+        let labelNode = btn.getChildByName('Label');
+        if (!labelNode) labelNode = this.addLabel(btn, 'Label', '今晚大果盘', 30, MILK, HOME_BTN_W - 48, 44);
+        const label = labelNode.getComponent(Label);
+        if (label) {
+            label.string = '今晚大果盘';
+            label.color = MILK;
+            label.fontSize = 30;
+            label.lineHeight = 40;
+            label.fontFamily = 'Microsoft YaHei';
         }
-
-        if (!entry.getComponent(Button)) entry.addComponent(Button);
-        entry.off(Node.EventType.TOUCH_END);
-        entry.on(Node.EventType.TOUCH_END, () => {
+        if (!btn.getComponent(Button)) btn.addComponent(Button);
+        btn.off(Node.EventType.TOUCH_END);
+        btn.on(Node.EventType.TOUCH_END, () => {
             playBtnClick();
             for (let i = 0; i < HOME_NODES.length; i++) {
                 const homeNode = this.node.getChildByName(HOME_NODES[i]);
@@ -410,47 +402,122 @@ export class GameController extends Component {
                 this.refreshAlbumLink();
             });
         }, this);
-        return entry;
+        return btn;
     }
 
-    /** §6.1：主页叠在 bg_home 成品图上——开始/图鉴热区；合合乐在冰箱左下地板。 */
-    private polishHomeChrome() {
-        const mergeEntry = this.ensureMergeEntry();
-        // 红框：冰箱底座左侧地板
-        mergeEntry.setPosition(-150, -210, 0);
+    private paintHomePill(node: Node, w: number, h: number, fill: Color): void {
+        const ui = node.getComponent(UITransform) ?? node.addComponent(UITransform);
+        ui.setContentSize(w, h);
+        const g = node.getComponent(Graphics) ?? node.addComponent(Graphics);
+        g.clear();
+        g.fillColor = new Color(61, 50, 41, 36);
+        g.roundRect(-w / 2, -h / 2 - 5, w, h, h / 2);
+        g.fill();
+        g.fillColor = fill;
+        g.roundRect(-w / 2, -h / 2, w, h, h / 2);
+        g.fill();
+    }
+
+    /** 背景图里画死了一颗开始按钮，三颗重排前先用奶油色盖住。 */
+    private ensureHomeBtnCover(): void {
+        let cover = this.node.getChildByName('HomeBtnCover');
+        if (!cover) {
+            cover = new Node('HomeBtnCover');
+            cover.layer = UI_2D;
+            this.node.addChild(cover);
+        }
+        const ui = cover.getComponent(UITransform) ?? cover.addComponent(UITransform);
+        ui.setContentSize(520, 190);
+        const g = cover.getComponent(Graphics) ?? cover.addComponent(Graphics);
+        g.clear();
+        g.fillColor = new Color(250, 241, 226, 255);
+        g.rect(-260, -95, 520, 190);
+        g.fill();
+        cover.setPosition(0, -430, 0);
         const bg = this.node.getChildByName('Bg');
-        if (bg) mergeEntry.setSiblingIndex(bg.getSiblingIndex() + 1);
+        if (bg) cover.setSiblingIndex(bg.getSiblingIndex() + 1);
+    }
+
+    /** §6.1：主页三颗同尺寸胶囊，居中排在奶油卡片上。颜色仍分开。 */
+    private polishHomeChrome() {
+        this.ensureHomeBtnCover();
+        const albumY = -616 + HOME_BTN_H / 2;
+        const mergeY = albumY + HOME_BTN_H + HOME_BTN_GAP;
+        const startY = mergeY + HOME_BTN_H + HOME_BTN_GAP;
+        const mergeBtn = this.ensureMergeHomeBtn();
+        mergeBtn.setPosition(0, mergeY, 0);
         const btn = this.node.getChildByName('BtnStart');
         if (btn) {
             const sp = btn.getComponent(Sprite);
-            if (sp) {
-                sp.color = new Color(255, 255, 255, 255);
-                sp.sizeMode = Sprite.SizeMode.CUSTOM;
-                if (this.btnStart) sp.spriteFrame = this.btnStart;
+            if (sp) sp.enabled = false;
+            const stuck = btn.getComponent(Graphics);
+            if (stuck) stuck.destroy();
+            const btnUi = btn.getComponent(UITransform) ?? btn.addComponent(UITransform);
+            btnUi.setContentSize(HOME_BTN_W, HOME_BTN_H);
+            let pill = btn.getChildByName('Pill');
+            if (!pill) {
+                pill = new Node('Pill');
+                pill.layer = UI_2D;
+                btn.addChild(pill);
             }
-            const label = btn.getChildByName('Label');
-            if (label) label.active = !(sp && sp.spriteFrame);
-            const btnUi = btn.getComponent(UITransform);
-            if (btnUi) btnUi.setContentSize(429, 123);
-            btn.setPosition(-0.5, -420.5, 0);
+            pill.setSiblingIndex(0);
+            this.paintHomePill(pill, HOME_BTN_W, HOME_BTN_H, CORAL);
+            const labelNode = btn.getChildByName('Label');
+            if (labelNode) {
+                labelNode.active = true;
+                labelNode.setSiblingIndex(btn.children.length - 1);
+                labelNode.setPosition(0, 0, 0);
+                const labelUi = labelNode.getComponent(UITransform);
+                if (labelUi) labelUi.setContentSize(HOME_BTN_W - 48, 44);
+                const label = labelNode.getComponent(Label);
+                if (label) {
+                    label.string = '开始收拾';
+                    label.color = MILK;
+                    label.fontSize = 30;
+                    label.lineHeight = 40;
+                    label.fontFamily = 'Microsoft YaHei';
+                    label.horizontalAlign = Label.HorizontalAlign.CENTER;
+                    label.verticalAlign = Label.VerticalAlign.CENTER;
+                }
+            }
+            btn.setPosition(0, startY, 0);
         }
         const album = this.node.getChildByName('AlbumLink');
         if (album) {
-            const label = album.getComponent(Label) || album.getComponentInChildren(Label);
-            if (label) {
-                label.color = SAGE;
-                label.fontSize = 28;
+            // 这个节点上已经有 Label，不能再挂 Graphics，否则胶囊画不出来，奶白字会融进奶油底。
+            const own = album.getComponent(Label);
+            if (own) {
+                own.enabled = false;
+                own.string = '';
             }
-            album.setPosition(0, -545, 0);
-            const ui = album.getComponent(UITransform);
-            if (ui) ui.setContentSize(640, 56);
+            const stuck = album.getComponent(Graphics);
+            if (stuck) stuck.destroy();
+            const albumUi = album.getComponent(UITransform) ?? album.addComponent(UITransform);
+            albumUi.setContentSize(HOME_BTN_W, HOME_BTN_H);
+            let pill = album.getChildByName('Pill');
+            if (!pill) {
+                pill = new Node('Pill');
+                pill.layer = UI_2D;
+                album.addChild(pill);
+            }
+            pill.setSiblingIndex(0);
+            this.paintHomePill(pill, HOME_BTN_W, HOME_BTN_H, WALNUT);
+            let text = album.getChildByName('Label');
+            if (!text) text = this.addLabel(album, 'Label', '', 30, MILK, HOME_BTN_W - 48, 44);
+            text.setSiblingIndex(album.children.length - 1);
+            const textUi = text.getComponent(UITransform);
+            if (textUi) textUi.setContentSize(HOME_BTN_W - 48, 44);
+            const label = text.getComponent(Label);
             if (label) {
-                label.color = WALNUT;
+                label.color = MILK;
                 label.fontSize = 30;
                 label.lineHeight = 40;
-                label.overflow = Label.Overflow.NONE;
+                label.fontFamily = 'Microsoft YaHei';
+                label.overflow = Label.Overflow.SHRINK;
                 label.enableWrapText = false;
             }
+            album.setPosition(0, albumY, 0);
+            album.setSiblingIndex(this.node.children.length - 1);
         }
         const mask = this.node.getChildByName('HomeBarMask');
         if (mask) mask.active = false;
@@ -463,8 +530,10 @@ export class GameController extends Component {
     private refreshAlbumLink() {
         const link = this.node.getChildByName('AlbumLink');
         if (!link) return;
-        const label = link.getComponent(Label) || link.getComponentInChildren(Label);
-        if (label) label.string = `我收过的冰箱  ${this.clearedId()}/${PLAYABLE.length}  >`;
+        const label = link.getChildByName('Label')?.getComponent(Label)
+            || link.getComponent(Label)
+            || link.getComponentInChildren(Label);
+        if (label && label.enabled) label.string = `我收过的冰箱  ${this.clearedId()}/${PLAYABLE.length}`;
     }
 
     /** 先出面板。食材图齐了再填看得见的卡片，槽位内容用存档里的种类。 */

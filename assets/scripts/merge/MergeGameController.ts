@@ -22,10 +22,13 @@ import {
     SpriteFrame,
     sys,
     tween,
+    view,
     UIOpacity,
     UITransform,
     Vec2,
     Vec3,
+    Prefab,
+    instantiate,
 } from 'cc';
 import { MergeBall } from './MergeBall';
 import { playMergeSfx } from './MergeSfx';
@@ -40,7 +43,7 @@ const BOARD_H = 850;
 const BOARD_BOTTOM = -500;
 const BOARD_TOP = BOARD_BOTTOM + BOARD_H;
 const FAIL_Y = BOARD_TOP - 75;
-const DROP_Y = BOARD_TOP + 75;
+const DROP_Y = BOARD_TOP + 40;
 const WALL = 24;
 const BEST_KEY = 'fridge_merge_best_score';
 
@@ -59,7 +62,7 @@ type FruitSpec = {
 
 /** 首版用程序化占位图，后续只需把绘制函数替换成 SpriteFrame。 */
 export const MERGE_FRUITS: readonly FruitSpec[] = [
-    { name: '冬枣', radius: 27, color: new Color(198, 132, 62, 255) },
+    { name: '葡萄', radius: 27, color: new Color(142, 72, 168, 255) },
     { name: '草莓', radius: 34, color: new Color(230, 101, 92, 255) },
     { name: '李子', radius: 42, color: new Color(176, 92, 122, 255) },
     { name: '橙子', radius: 51, color: new Color(235, 151, 73, 255) },
@@ -94,6 +97,10 @@ export class MergeGameController extends Component {
     private burstFrame: SpriteFrame | null = null;
     private bgSprite: Sprite | null = null;
     private titleArt: Sprite | null = null;
+    private taglinePlate: Node | null = null;
+    private tagline: Node | null = null;
+    private screenW = DESIGN_W;
+    private screenH = DESIGN_H;
     /** 水果图片层。和刚体分开，避免物理节点上的 Sprite 不绘制。 */
     private fruitLayer: Node | null = null;
 
@@ -102,7 +109,12 @@ export class MergeGameController extends Component {
         this.best = Number(sys.localStorage.getItem(BEST_KEY) || 0) || 0;
         this.buildView();
         this.startRound();
-        this.loadMergeUiAssets();
+        resources.load('merge/MergeHud', Prefab, (error, prefab) => {
+            if (!this.node?.isValid) return;
+            if (!error && prefab) this.applyHudPrefab(prefab);
+            this.loadMergeUiAssets();
+            this.updateScore();
+        });
     }
 
     onDestroy(): void {
@@ -172,14 +184,54 @@ export class MergeGameController extends Component {
         node.destroy();
     }
 
+    /** 可见区域。宽适配时高度会超过 1280，画布中心仍是 (0,0)。 */
+    private measureScreen(): void {
+        const parentUi = this.node.parent?.getComponent(UITransform);
+        const vis = view.getVisibleSize();
+        this.screenW = Math.max(parentUi?.width || 0, vis.width || 0, DESIGN_W);
+        this.screenH = Math.max(parentUi?.height || 0, vis.height || 0, DESIGN_H);
+    }
+
+    /** 背景等比铺满，多出来的边裁掉，不把厨房图拉高。 */
+    private coverSize(): { w: number; h: number } {
+        const scale = Math.max(this.screenW / DESIGN_W, this.screenH / DESIGN_H);
+        return { w: DESIGN_W * scale, h: DESIGN_H * scale };
+    }
+
+    /** 微信刘海和右上角胶囊。编辑器里没有 wx，不额外下压。 */
+    private topInset(): number {
+        const wxApi = (globalThis as {
+            wx?: {
+                getWindowInfo?: () => { windowWidth?: number; screenWidth?: number; statusBarHeight?: number; safeArea?: { top?: number } };
+                getSystemInfoSync?: () => { windowWidth?: number; screenWidth?: number; statusBarHeight?: number; safeArea?: { top?: number } };
+                getMenuButtonBoundingClientRect?: () => { bottom?: number };
+            };
+        }).wx;
+        if (!wxApi) return 0;
+        try {
+            const info = wxApi.getWindowInfo ? wxApi.getWindowInfo() : wxApi.getSystemInfoSync?.();
+            const windowW = info && (info.windowWidth || info.screenWidth);
+            const scale = windowW ? this.screenW / windowW : 1;
+            let top = info?.safeArea?.top ?? info?.statusBarHeight ?? 0;
+            const menu = wxApi.getMenuButtonBoundingClientRect?.();
+            if (menu?.bottom) top = Math.max(top, menu.bottom);
+            const design = Math.round(top * scale);
+            return design > 0 ? design : 0;
+        } catch {
+            return 0;
+        }
+    }
+
     private buildView(): void {
+        this.measureScreen();
+        const cover = this.coverSize();
         const rootUi = this.node.getComponent(UITransform) ?? this.node.addComponent(UITransform);
-        rootUi.setContentSize(DESIGN_W, DESIGN_H);
+        rootUi.setContentSize(this.screenW, this.screenH);
         this.node.layer = UI_2D;
 
         const bg = new Node('Background');
         bg.layer = UI_2D;
-        bg.addComponent(UITransform).setContentSize(DESIGN_W, DESIGN_H);
+        bg.addComponent(UITransform).setContentSize(cover.w, cover.h);
         const bgSp = bg.addComponent(Sprite);
         bgSp.sizeMode = Sprite.SizeMode.CUSTOM;
         bgSp.color = Color.WHITE;
@@ -187,24 +239,24 @@ export class MergeGameController extends Component {
         // 加载前先垫奶油底，避免闪空
         const fallback = bg.addComponent(Graphics);
         fallback.fillColor = CREAM;
-        fallback.rect(-DESIGN_W / 2, -DESIGN_H / 2, DESIGN_W, DESIGN_H);
+        fallback.rect(-cover.w / 2, -cover.h / 2, cover.w, cover.h);
         fallback.fill();
         this.node.addChild(bg);
 
         const titleArt = new Node('TitleArt');
         titleArt.layer = UI_2D;
-        titleArt.setPosition(-8, 614);
-        titleArt.addComponent(UITransform).setContentSize(300, 52);
+        titleArt.setPosition(0, 0);
+        titleArt.addComponent(UITransform).setContentSize(450, 120);
         const titleSprite = titleArt.addComponent(Sprite);
         titleSprite.sizeMode = Sprite.SizeMode.CUSTOM;
         titleSprite.color = Color.WHITE;
         titleArt.active = false;
         this.titleArt = titleSprite;
         this.node.addChild(titleArt);
-        this.addLabel(this.node, 'Title', '冰箱合合乐', 32, WALNUT, 280, 44, -20, 612);
+        this.addLabel(this.node, 'Title', '今晚大果盘', 32, WALNUT, 280, 44, 0, 0);
 
         const scoreCard = this.scoreShelf();
-        scoreCard.setPosition(-36, 548);
+        scoreCard.setPosition(-36, 0);
         this.node.addChild(scoreCard);
         this.addLabel(scoreCard, 'ScoreCaption', '本局', 16, SAGE, 150, 22, -92, 16);
         this.scoreLabel = this.addLabel(scoreCard, 'Score', '0', 32, CORAL, 150, 38, -92, -12).getComponent(Label);
@@ -213,19 +265,19 @@ export class MergeGameController extends Component {
 
         const nextToken = new Node('NextToken');
         nextToken.layer = UI_2D;
-        nextToken.setPosition(286, 548);
-        nextToken.addComponent(UITransform).setContentSize(96, 120);
+        nextToken.setPosition(274, 0);
+        nextToken.addComponent(UITransform).setContentSize(112, 132);
         this.node.addChild(nextToken);
         const captionPlate = new Node('CaptionPlate');
         captionPlate.layer = UI_2D;
         captionPlate.setPosition(0, 58);
-        captionPlate.addComponent(UITransform).setContentSize(76, 28);
+        captionPlate.addComponent(UITransform).setContentSize(84, 30);
         const plate = captionPlate.addComponent(Graphics);
         plate.fillColor = new Color(255, 253, 248, 235);
-        plate.roundRect(-38, -14, 76, 28, 14);
+        plate.roundRect(-42, -15, 84, 30, 15);
         plate.fill();
         nextToken.addChild(captionPlate);
-        const caption = this.addLabel(captionPlate, 'Caption', '下一个', 16, WALNUT, 72, 24, 0, 0);
+        const caption = this.addLabel(captionPlate, 'Caption', '下一个', 16, WALNUT, 76, 24, 0, 0);
         const captionLabel = caption.getComponent(Label);
         if (captionLabel) captionLabel.isBold = true;
         this.nextIcon = new Node('NextIcon');
@@ -233,11 +285,37 @@ export class MergeGameController extends Component {
         this.nextIcon.addComponent(UITransform).setContentSize(80, 80);
         this.nextIcon.addComponent(Sprite).sizeMode = Sprite.SizeMode.CUSTOM;
         nextToken.addChild(this.nextIcon);
-        this.nextLabel = this.addLabel(nextToken, 'Next', '', 18, WALNUT, 110, 24, 0, -52).getComponent(Label);
+        const nextNamePlate = this.roundRectNode(
+            'NextNamePlate',
+            88,
+            30,
+            new Color(255, 253, 248, 224),
+            15,
+            new Color(176, 130, 96, 120),
+            2,
+        );
+        nextNamePlate.setPosition(0, -54);
+        nextToken.addChild(nextNamePlate);
+        nextNamePlate.setSiblingIndex(0);
+        this.nextLabel = this.addLabel(nextToken, 'Next', '', 18, WALNUT, 96, 24, 0, -54).getComponent(Label);
+
+        const taglinePlate = this.roundRectNode(
+            'TaglinePlate',
+            468,
+            42,
+            new Color(255, 253, 248, 214),
+            21,
+            new Color(176, 130, 96, 90),
+            2,
+        );
+        this.node.addChild(taglinePlate);
+        this.taglinePlate = taglinePlate;
+        const tagline = this.addLabel(taglinePlate, 'Tagline', '相同食材，合成更大的美味', 20, WALNUT, 420, 30, 0, 0);
+        this.tagline = tagline;
 
         const close = new Node('BtnClose');
         close.layer = UI_2D;
-        close.setPosition(-312, 612);
+        close.setPosition(-304, 0);
         close.addComponent(UITransform).setContentSize(88, 88);
         const cg = close.addComponent(Graphics);
         cg.fillColor = MILK;
@@ -261,17 +339,22 @@ export class MergeGameController extends Component {
             this.closeMerge();
         }, this);
         this.node.addChild(close);
+        this.layoutHeader();
 
         this.board = new Node('Board');
         this.board.layer = UI_2D;
         this.board.addComponent(UITransform).setContentSize(BOARD_W, BOARD_H);
-        this.board.setPosition(0, BOARD_BOTTOM + BOARD_H / 2);
+        const screenBottom = -this.screenH / 2;
+        const lift = Math.max(0, screenBottom + 24 - BOARD_BOTTOM);
+        this.board.setPosition(0, BOARD_BOTTOM + BOARD_H / 2 + lift);
         this.node.addChild(this.board);
         this.paintBoard();
         const views = new Node('FruitViews');
         views.layer = UI_2D;
         views.addComponent(UITransform).setContentSize(DESIGN_W, DESIGN_H);
         this.node.addChild(views);
+        this.board.setSiblingIndex(1);
+        views.setSiblingIndex(2);
         this.fruitLayer = views;
 
         this.node.on(Input.EventType.TOUCH_START, this.onTouchStart, this);
@@ -285,11 +368,36 @@ export class MergeGameController extends Component {
         director.on(Director.EVENT_AFTER_PHYSICS, this.syncFruitViews, this);
     }
 
+    /** 把 MergeHud 预制体上的位置和尺寸套到运行时节点。预制体本身不留在场景里。 */
+    private applyHudPrefab(prefab: Prefab): void {
+        const hud = instantiate(prefab);
+        const take = (name: string, target: Node | null | undefined) => {
+            const src = hud.getChildByName(name);
+            if (!src || !target) return;
+            target.setPosition(src.position);
+            target.setScale(src.scale);
+            const from = src.getComponent(UITransform);
+            const to = target.getComponent(UITransform);
+            if (from && to) to.setContentSize(from.contentSize);
+        };
+        take('TitleArt', this.titleArt?.node);
+        const title = this.titleArt?.node;
+        const titleLabel = this.node.getChildByName('Title');
+        if (title && titleLabel) titleLabel.setPosition(title.position);
+        const boardMark = hud.getChildByName('Board');
+        if (boardMark && this.board) this.board.setPosition(boardMark.position);
+        hud.destroy();
+        this.layoutHeader();
+    }
+
     private paintBoard(): void {
         if (!this.board) return;
         const g = this.board.addComponent(Graphics);
-        g.fillColor = new Color(255, 253, 248, 70);
+        g.fillColor = new Color(255, 253, 248, 96);
         g.roundRect(-BOARD_W / 2, -BOARD_H / 2, BOARD_W, BOARD_H, 22);
+        g.fill();
+        g.fillColor = new Color(255, 253, 248, 28);
+        g.roundRect(-BOARD_W / 2 + 10, -BOARD_H / 2 + 10, BOARD_W - 20, BOARD_H - 20, 18);
         g.fill();
         g.strokeColor = FRAME;
         g.lineWidth = 6;
@@ -299,12 +407,21 @@ export class MergeGameController extends Component {
         const line = new Node('FailLine');
         line.layer = UI_2D;
         const lineUi = line.addComponent(UITransform);
-        lineUi.setContentSize(BOARD_W - 34, 8);
+        lineUi.setContentSize(BOARD_W - 34, 14);
         const lg = line.addComponent(Graphics);
-        lg.strokeColor = new Color(CORAL.r, CORAL.g, CORAL.b, 150);
+        const lineW = BOARD_W - 34;
+        lg.fillColor = new Color(CORAL.r, CORAL.g, CORAL.b, 38);
+        lg.roundRect(-lineW / 2, -5, lineW, 10, 5);
+        lg.fill();
+        lg.strokeColor = new Color(CORAL.r, CORAL.g, CORAL.b, 210);
         lg.lineWidth = 4;
-        lg.moveTo(-(BOARD_W - 34) / 2, 0);
-        lg.lineTo((BOARD_W - 34) / 2, 0);
+        lg.moveTo(-lineW / 2, 0);
+        lg.lineTo(lineW / 2, 0);
+        lg.stroke();
+        lg.strokeColor = new Color(255, 253, 248, 110);
+        lg.lineWidth = 1.5;
+        lg.moveTo(-lineW / 2, 3);
+        lg.lineTo(lineW / 2, 3);
         lg.stroke();
         line.setPosition(0, FAIL_Y - (BOARD_BOTTOM + BOARD_H / 2));
         this.board.addChild(line);
@@ -498,11 +615,11 @@ export class MergeGameController extends Component {
             icon.addComponent(UITransform);
             view.addChild(icon);
         }
-        const art = size;
+        const textureReady = !!(frame?.texture && frame.texture.width > 0);
+        const art = textureReady ? Math.round(size * 0.93) : size;
         const iconUi = icon.getComponent(UITransform);
         iconUi?.setContentSize(art, art);
         let sprite = icon.getComponent(Sprite);
-        const textureReady = !!(frame?.texture && frame.texture.width > 0);
         if (textureReady && frame) {
             if (!sprite) sprite = icon.addComponent(Sprite);
             sprite.sizeMode = Sprite.SizeMode.CUSTOM;
@@ -515,15 +632,19 @@ export class MergeGameController extends Component {
             sprite.enabled = false;
         }
         let g = view.getComponent(Graphics);
+        if (!g) g = view.addComponent(Graphics);
+        g.enabled = true;
+        g.clear();
+        g.fillColor = new Color(61, 50, 41, 34);
+        g.circle(0, -4, Math.max(8, spec.radius - 4));
+        g.fill();
+        g.fillColor = new Color(255, 253, 248, textureReady ? 160 : 110);
+        g.circle(0, 0, Math.max(10, spec.radius - 1));
+        g.fill();
         if (!textureReady) {
-            if (!g) g = view.addComponent(Graphics);
-            g.enabled = true;
-            g.clear();
             g.fillColor = spec.color;
-            g.circle(0, 0, spec.radius - 2);
+            g.circle(0, 0, Math.max(8, spec.radius - 5));
             g.fill();
-        } else if (g) {
-            g.enabled = false;
         }
 
         let labelNode = view.getChildByName('FruitName');
@@ -600,7 +721,7 @@ export class MergeGameController extends Component {
                 if (fruit) this.fruitFrames.set(fruit[0], frame);
                 if (/merge_bg/i.test(name)) bgFrame = frame;
                 if (/merge_burst/i.test(name)) this.burstFrame = frame;
-                if (/merge_title/i.test(name)) titleFrame = frame;
+                if (name === 'merge_title') titleFrame = frame;
             }
             if (this.board) {
                 for (const child of this.board.children) {
@@ -638,7 +759,8 @@ export class MergeGameController extends Component {
         this.bgSprite.spriteFrame = frame;
         this.bgSprite.sizeMode = Sprite.SizeMode.CUSTOM;
         const ui = this.bgSprite.node.getComponent(UITransform);
-        ui?.setContentSize(DESIGN_W, DESIGN_H);
+        const cover = this.coverSize();
+        ui?.setContentSize(cover.w, cover.h);
         const fallback = this.bgSprite.node.getComponent(Graphics);
         if (fallback) fallback.enabled = false;
         // 保证背景在最底层
@@ -649,12 +771,38 @@ export class MergeGameController extends Component {
         const sprite = this.titleArt;
         if (!sprite?.isValid) return;
         const ui = sprite.node.getComponent(UITransform);
+        const srcW = frame.rect.width || 318;
+        const srcH = frame.rect.height || 85;
+        const h = 120;
+        const w = Math.round(h * srcW / Math.max(1, srcH));
         sprite.sizeMode = Sprite.SizeMode.CUSTOM;
         sprite.spriteFrame = frame;
-        ui?.setContentSize(300, 52);
+        ui?.setContentSize(w, h);
         sprite.node.active = true;
         const label = this.node.getChildByName('Title');
         if (label) label.active = false;
+        this.layoutHeader();
+    }
+
+    /** 标题原比例，副标题贴在下面，返回按钮与分数同一行。 */
+    private layoutHeader(): void {
+        const top = this.screenH / 2 - this.topInset() - 36;
+        const titleNode = this.titleArt?.node;
+        const titleUi = titleNode?.getComponent(UITransform);
+        const titleH = titleUi?.height || 120;
+        const titleY = top - titleH / 2;
+        titleNode?.setPosition(0, titleY, 0);
+        this.node.getChildByName('Title')?.setPosition(0, titleY, 0);
+
+        const tagPlate = this.taglinePlate;
+        const tagH = tagPlate?.getComponent(UITransform)?.height || 42;
+        const tagY = titleY - titleH / 2 - 12 - tagH / 2;
+        tagPlate?.setPosition(0, tagY, 0);
+
+        const scoreY = tagY - tagH / 2 - 22 - 39;
+        this.node.getChildByName('ScoreShelf')?.setPosition(-10, scoreY, 0);
+        this.node.getChildByName('NextToken')?.setPosition(274, scoreY, 0);
+        this.node.getChildByName('BtnClose')?.setPosition(-304, scoreY, 0);
     }
 
     lateUpdate(): void {
@@ -750,19 +898,15 @@ export class MergeGameController extends Component {
         this.gameOver = true;
         this.inputLocked = true;
         this.current = null;
-        if (this.score > this.best) {
-            this.best = this.score;
-            sys.localStorage.setItem(BEST_KEY, String(this.best));
-        }
         this.updateScore();
         playMergeSfx('gameOver');
 
         const layer = new Node('GameOverLayer');
         layer.layer = UI_2D;
-        layer.addComponent(UITransform).setContentSize(DESIGN_W, DESIGN_H);
+        layer.addComponent(UITransform).setContentSize(this.screenW, this.screenH);
         const dim = layer.addComponent(Graphics);
         dim.fillColor = new Color(61, 50, 41, 150);
-        dim.rect(-DESIGN_W / 2, -DESIGN_H / 2, DESIGN_W, DESIGN_H);
+        dim.rect(-this.screenW / 2, -this.screenH / 2, this.screenW, this.screenH);
         dim.fill();
         this.node.addChild(layer);
         this.gameOverLayer = layer;
@@ -785,7 +929,10 @@ export class MergeGameController extends Component {
     }
 
     private updateScore(): void {
-        if (this.score > this.best) this.best = this.score;
+        if (this.score > this.best) {
+            this.best = this.score;
+            sys.localStorage.setItem(BEST_KEY, String(this.best));
+        }
         if (this.scoreLabel) this.scoreLabel.string = String(this.score);
         if (this.bestLabel) this.bestLabel.string = String(this.best);
     }

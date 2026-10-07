@@ -29,7 +29,18 @@ import { BoardState } from './game/BoardState';
 import { packTrayGrid, TRAY_GAP, TRAY_WALL_H, TRAY_WALL_TOP, TRAY_WALL_W } from './game/levelLayout';
 import { albumStatusLine, noteAlbumWin, prepareAlbum, visibleAlbumGrade, winStepLine } from './game/AlbumState';
 import { levelById as levelDefById, nextPlayable as nextPlayableLevel, PLAYABLE } from './game/playableLevels';
-import { playBtnClick, playFridgeDrop, playSfx, playTrayDoorClose, preloadSfx } from './game/Sfx';
+import {
+    isSfxEnabled,
+    isVibrationEnabled,
+    playBtnClick,
+    playFridgeDrop,
+    playSfx,
+    playTrayDoorClose,
+    playTrayDoorVibration,
+    preloadSfx,
+    setSfxEnabled,
+    setVibrationEnabled,
+} from './game/Sfx';
 import type { AlbumGrade } from './game/AlbumState';
 import type { AlbumEntry } from './game/AlbumState';
 import type { Dest, FailReason, FoodId, HintPick, LevelDef, PlaceFail, PlaceReason } from './game/types';
@@ -142,11 +153,23 @@ const UUID = {
     builtin: '20835ba4-6145-4fbc-a58a-051ce700aa3e@f9941',
 };
 
-const HOME_NODES = ['Bg', 'Title', 'BtnStart', 'MergeHomeBtn', 'AlbumLink', 'HomeBarMask', 'HomeBtnCover'];
+const HOME_NODES = ['Bg', 'Title', 'BtnStart', 'MergeHomeBtn', 'AlbumLink', 'HomeBarMask', 'HomeBtnCover', 'BtnSettings'];
 /** 主页三颗按钮同一尺寸。奶油卡片放得下三颗 420×84，间距 16。 */
 const HOME_BTN_W = 420;
 const HOME_BTN_H = 84;
 const HOME_BTN_GAP = 16;
+/** 最底一颗胶囊底边 y（Cocos 中心原点）。 */
+const HOME_BTN_BOTTOM_Y = -664;
+/** 三颗按钮背后奶油遮罩中心 y。 */
+const HOME_BTN_COVER_Y = -478;
+const HOME_SETTINGS_X = -268;
+const HOME_SETTINGS_Y = 538;
+const SETTINGS_BTN_W = 96;
+const SETTINGS_BTN_H = 96;
+const SETTINGS_CARD_W = 560;
+const SETTINGS_CARD_H = 600;
+const SETTINGS_TOGGLE_W = 92;
+const SETTINGS_TOGGLE_H = 44;
 const CLEARED_KEY = 'fridge_cleared';
 const MILESTONE_KEY = (n: number) => `fridge_milestone_${n}`;
 const MILESTONE_NS = [10, 20, 30];
@@ -311,6 +334,7 @@ export class GameController extends Component {
         // 自检含可见信息审计，同步跑会把预览进度条卡住。用 tools/run_level_selfchecks_19_30.ts。
         this.bindGm();
         this.bindHome();
+        this.fitHomeBackground();
         this.refreshAlbumLink();
         void preloadSfx();
         void this.ensureLevel1Frames();
@@ -389,6 +413,7 @@ export class GameController extends Component {
         btn.off(Node.EventType.TOUCH_END);
         btn.on(Node.EventType.TOUCH_END, () => {
             playBtnClick();
+            this.closeSettingsLayer();
             for (let i = 0; i < HOME_NODES.length; i++) {
                 const homeNode = this.node.getChildByName(HOME_NODES[i]);
                 if (homeNode) homeNode.active = false;
@@ -405,6 +430,88 @@ export class GameController extends Component {
         return btn;
     }
 
+    private ensureHomeSettingsBtn(): Node {
+        let btn = this.node.getChildByName('BtnSettings');
+        if (!btn) {
+            btn = new Node('BtnSettings');
+            btn.layer = UI_2D;
+            this.node.addChild(btn);
+            this.bindHudPress(btn, () => {
+                const open = this.node.getChildByName('SettingsLayer');
+                if (open) return;
+                this.openSettingsLayer();
+            });
+        }
+        const ui = btn.getComponent(UITransform) ?? btn.addComponent(UITransform);
+        ui.setContentSize(SETTINGS_BTN_W + 20, SETTINGS_BTN_H + 20);
+        const g = btn.getComponent(Graphics) ?? btn.addComponent(Graphics);
+        g.clear();
+        const oldLabel = btn.getChildByName('Label');
+        if (oldLabel) oldLabel.destroy();
+
+        let shadow = btn.getChildByName('Shadow');
+        if (!shadow) {
+            shadow = new Node('Shadow');
+            shadow.layer = UI_2D;
+            btn.addChild(shadow);
+        }
+        shadow.setPosition(0, -10, 0);
+        this.paintSettingsCircle(shadow, SETTINGS_BTN_W, new Color(123, 88, 59, 44));
+
+        let face = btn.getChildByName('Face');
+        if (!face) {
+            face = new Node('Face');
+            face.layer = UI_2D;
+            btn.addChild(face);
+        }
+        face.setPosition(0, 0, 0);
+        this.paintSettingsCircle(face, SETTINGS_BTN_W, new Color(252, 247, 239, 255));
+
+        let gear = btn.getChildByName('Gear');
+        if (!gear) {
+            gear = new Node('Gear');
+            gear.layer = UI_2D;
+            btn.addChild(gear);
+        }
+        gear.setPosition(0, 0, 0);
+        this.paintSettingsGear(gear, 26, 18, 9, WALNUT, new Color(252, 247, 239, 255));
+        btn.setSiblingIndex(this.node.children.length - 1);
+        return btn;
+    }
+
+    private paintSettingsCircle(node: Node, diameter: number, color: Color): void {
+        const ui = node.getComponent(UITransform) ?? node.addComponent(UITransform);
+        ui.setContentSize(diameter, diameter);
+        const g = node.getComponent(Graphics) ?? node.addComponent(Graphics);
+        g.clear();
+        g.fillColor = color;
+        g.circle(0, 0, diameter / 2);
+        g.fill();
+    }
+
+    private paintSettingsGear(node: Node, outerR: number, innerR: number, holeR: number, color: Color, cutout: Color): void {
+        const size = outerR * 2 + 8;
+        const ui = node.getComponent(UITransform) ?? node.addComponent(UITransform);
+        ui.setContentSize(size, size);
+        const g = node.getComponent(Graphics) ?? node.addComponent(Graphics);
+        g.clear();
+        g.fillColor = color;
+        const teeth = 8;
+        for (let i = 0; i < teeth * 2; i++) {
+            const angle = -Math.PI / 2 + (i * Math.PI) / teeth;
+            const radius = i % 2 === 0 ? outerR : innerR;
+            const x = Math.cos(angle) * radius;
+            const y = Math.sin(angle) * radius;
+            if (i === 0) g.moveTo(x, y);
+            else g.lineTo(x, y);
+        }
+        g.close();
+        g.fill();
+        g.fillColor = cutout;
+        g.circle(0, 0, holeR);
+        g.fill();
+    }
+
     private paintHomePill(node: Node, w: number, h: number, fill: Color): void {
         const ui = node.getComponent(UITransform) ?? node.addComponent(UITransform);
         ui.setContentSize(w, h);
@@ -416,6 +523,21 @@ export class GameController extends Component {
         g.fillColor = fill;
         g.roundRect(-w / 2, -h / 2, w, h, h / 2);
         g.fill();
+    }
+
+    /** 主页背景图按 cover 铺满可视区，避免高屏上露出纯色空白。 */
+    private fitHomeBackground(): void {
+        const bg = this.node.getChildByName('Bg');
+        if (!bg) return;
+        const ui = bg.getComponent(UITransform) ?? bg.addComponent(UITransform);
+        const sp = bg.getComponent(Sprite);
+        if (sp) sp.sizeMode = Sprite.SizeMode.CUSTOM;
+        const size = this.canvasSize();
+        const srcW = 720;
+        const srcH = 1280;
+        const scale = Math.max(size.w / srcW, size.h / srcH);
+        ui.setContentSize(srcW * scale, srcH * scale);
+        bg.setPosition(0, 0, 0);
     }
 
     /** 背景图里画死了一颗开始按钮，三颗重排前先用奶油色盖住。 */
@@ -433,15 +555,16 @@ export class GameController extends Component {
         g.fillColor = new Color(250, 241, 226, 255);
         g.rect(-260, -95, 520, 190);
         g.fill();
-        cover.setPosition(0, -430, 0);
+        cover.setPosition(0, HOME_BTN_COVER_Y, 0);
         const bg = this.node.getChildByName('Bg');
         if (bg) cover.setSiblingIndex(bg.getSiblingIndex() + 1);
     }
 
     /** §6.1：主页三颗同尺寸胶囊，居中排在奶油卡片上。颜色仍分开。 */
     private polishHomeChrome() {
+        this.fitHomeBackground();
         this.ensureHomeBtnCover();
-        const albumY = -616 + HOME_BTN_H / 2;
+        const albumY = HOME_BTN_BOTTOM_Y + HOME_BTN_H / 2;
         const mergeY = albumY + HOME_BTN_H + HOME_BTN_GAP;
         const startY = mergeY + HOME_BTN_H + HOME_BTN_GAP;
         const mergeBtn = this.ensureMergeHomeBtn();
@@ -521,10 +644,249 @@ export class GameController extends Component {
         }
         const mask = this.node.getChildByName('HomeBarMask');
         if (mask) mask.active = false;
-        const settingsBtn = this.node.getChildByName('BtnSettings');
-        if (settingsBtn) settingsBtn.destroy();
-        const settingsLayer = this.node.getChildByName('SettingsLayer');
-        if (settingsLayer) settingsLayer.destroy();
+        const settingsBtn = this.ensureHomeSettingsBtn();
+        settingsBtn.setPosition(HOME_SETTINGS_X, HOME_SETTINGS_Y, 0);
+        settingsBtn.active = true;
+        this.closeSettingsLayer();
+    }
+
+    private closeSettingsLayer(): void {
+        const layer = this.node.getChildByName('SettingsLayer');
+        if (layer) layer.destroy();
+    }
+
+    private openSettingsLayer(): void {
+        this.closeSettingsLayer();
+        const size = this.canvasSize();
+        const layer = new Node('SettingsLayer');
+        layer.layer = UI_2D;
+        layer.addComponent(UITransform).setContentSize(size.w, size.h);
+        this.node.addChild(layer);
+
+        const dim = this.addSprite(layer, 'Dim', this.builtin, size.w, size.h, 0, 0, new Color(61, 50, 41, 76));
+        dim.on(Node.EventType.TOUCH_START, () => {}, this);
+        dim.on(Node.EventType.TOUCH_MOVE, () => {}, this);
+        dim.on(Node.EventType.TOUCH_END, () => {}, this);
+        dim.on(Node.EventType.TOUCH_CANCEL, () => {}, this);
+
+        const shadow = new Node('CardShadow');
+        shadow.layer = UI_2D;
+        shadow.setPosition(0, 10, 0);
+        shadow.addComponent(UITransform).setContentSize(SETTINGS_CARD_W, SETTINGS_CARD_H);
+        const sg = shadow.addComponent(Graphics);
+        sg.fillColor = new Color(123, 88, 59, 34);
+        sg.roundRect(-SETTINGS_CARD_W / 2, -SETTINGS_CARD_H / 2, SETTINGS_CARD_W, SETTINGS_CARD_H, 44);
+        sg.fill();
+        layer.addChild(shadow);
+
+        const card = new Node('Card');
+        card.layer = UI_2D;
+        card.setPosition(0, 24, 0);
+        card.addComponent(UITransform).setContentSize(SETTINGS_CARD_W, SETTINGS_CARD_H);
+        const g = card.addComponent(Graphics);
+        g.fillColor = new Color(250, 244, 236, 255);
+        g.roundRect(-SETTINGS_CARD_W / 2, -SETTINGS_CARD_H / 2, SETTINGS_CARD_W, SETTINGS_CARD_H, 42);
+        g.fill();
+        g.lineWidth = 3;
+        g.strokeColor = new Color(214, 193, 170, 120);
+        g.roundRect(-SETTINGS_CARD_W / 2, -SETTINGS_CARD_H / 2, SETTINGS_CARD_W, SETTINGS_CARD_H, 42);
+        g.stroke();
+        const title = this.addLabel(card, 'Title', '设置', 44, WALNUT, 220, 56);
+        title.setPosition(0, 188, 0);
+        layer.addChild(card);
+
+        this.addSettingsRow(card, 'SfxRow', 'sfx', '音效', 76, isSfxEnabled(), () => {
+            const next = !isSfxEnabled();
+            setSfxEnabled(next);
+            this.syncSettingsRow(card, 'SfxRow', next);
+        });
+        this.addSettingsDivider(card, 18);
+        this.addSettingsRow(card, 'VibrationRow', 'vibration', '振动', -86, isVibrationEnabled(), () => {
+            const next = !isVibrationEnabled();
+            setVibrationEnabled(next);
+            this.syncSettingsRow(card, 'VibrationRow', next);
+        });
+
+        const close = new Node('Close');
+        close.layer = UI_2D;
+        close.setPosition(0, -222, 0);
+        close.addComponent(UITransform).setContentSize(216, 68);
+        const closeG = close.addComponent(Graphics);
+        closeG.fillColor = SAGE;
+        closeG.roundRect(-108, -34, 216, 68, 34);
+        closeG.fill();
+        closeG.lineWidth = 3;
+        closeG.strokeColor = new Color(176, 130, 96, 120);
+        closeG.roundRect(-108, -34, 216, 68, 34);
+        closeG.stroke();
+        const closeLabel = this.addLabel(close, 'Label', '关闭', 30, WALNUT, 120, 40);
+        closeLabel.setPosition(0, 0, 0);
+        card.addChild(close);
+        this.bindHudPress(close, () => this.closeSettingsLayer());
+
+        const op = card.addComponent(UIOpacity);
+        op.opacity = 0;
+        tween(op).to(0.18, { opacity: 255 }).start();
+        card.setScale(0.94, 0.94, 1);
+        tween(card).to(0.2, { scale: new Vec3(1, 1, 1) }, { easing: easing.backOut }).start();
+    }
+
+    private addSettingsDivider(parent: Node, y: number): void {
+        const line = new Node('Divider');
+        line.layer = UI_2D;
+        line.setPosition(0, y, 0);
+        line.addComponent(UITransform).setContentSize(438, 2);
+        const g = line.addComponent(Graphics);
+        g.fillColor = new Color(176, 130, 96, 56);
+        g.roundRect(-219, -1, 438, 2, 1);
+        g.fill();
+        parent.addChild(line);
+    }
+
+    private addSettingsRow(
+        parent: Node,
+        name: string,
+        kind: 'sfx' | 'vibration',
+        text: string,
+        y: number,
+        on: boolean,
+        tap: () => void,
+    ): void {
+        const row = new Node(name);
+        row.layer = UI_2D;
+        row.setPosition(0, y, 0);
+        row.addComponent(UITransform).setContentSize(452, 108);
+        parent.addChild(row);
+
+        const icon = new Node('Icon');
+        icon.layer = UI_2D;
+        icon.setPosition(-188, 0, 0);
+        row.addChild(icon);
+        this.paintSettingsRowIcon(icon, kind);
+
+        const label = this.addLabel(row, 'Label', text, 34, WALNUT, 150, 46);
+        label.setPosition(-120, 0, 0);
+        const labelComp = label.getComponent(Label);
+        if (labelComp) {
+            labelComp.horizontalAlign = Label.HorizontalAlign.LEFT;
+            labelComp.fontFamily = 'Microsoft YaHei';
+        }
+
+        const toggle = new Node('Toggle');
+        toggle.layer = UI_2D;
+        toggle.setPosition(164, 0, 0);
+        toggle.addComponent(UITransform).setContentSize(SETTINGS_TOGGLE_W + 20, SETTINGS_TOGGLE_H + 20);
+        row.addChild(toggle);
+        this.paintSettingsToggle(toggle, on);
+        this.bindHudPress(toggle, tap);
+    }
+
+    private paintSettingsRowIcon(node: Node, kind: 'sfx' | 'vibration'): void {
+        const ui = node.getComponent(UITransform) ?? node.addComponent(UITransform);
+        ui.setContentSize(46, 46);
+        node.destroyAllChildren();
+        const stale = node.getComponent(Graphics);
+        if (stale) stale.clear();
+        if (kind === 'sfx') {
+            const body = new Node('Body');
+            body.layer = UI_2D;
+            node.addChild(body);
+            const bodyG = body.addComponent(Graphics);
+            bodyG.fillColor = WALNUT;
+            bodyG.moveTo(-18, -6);
+            bodyG.lineTo(-8, -6);
+            bodyG.lineTo(2, -16);
+            bodyG.lineTo(2, 16);
+            bodyG.lineTo(-8, 6);
+            bodyG.lineTo(-18, 6);
+            bodyG.close();
+            bodyG.fill();
+
+            const wave1 = new Node('Wave1');
+            wave1.layer = UI_2D;
+            node.addChild(wave1);
+            const wave1G = wave1.addComponent(Graphics);
+            wave1G.lineWidth = 4;
+            wave1G.strokeColor = WALNUT;
+            wave1G.arc(6, 0, 8, -0.9, 0.9, false);
+            wave1G.stroke();
+
+            const wave2 = new Node('Wave2');
+            wave2.layer = UI_2D;
+            node.addChild(wave2);
+            const wave2G = wave2.addComponent(Graphics);
+            wave2G.lineWidth = 4;
+            wave2G.strokeColor = WALNUT;
+            wave2G.arc(7, 0, 14, -0.85, 0.85, false);
+            wave2G.stroke();
+            return;
+        }
+
+        const phone = new Node('Phone');
+        phone.layer = UI_2D;
+        node.addChild(phone);
+        const phoneG = phone.addComponent(Graphics);
+        phoneG.lineWidth = 4;
+        phoneG.strokeColor = WALNUT;
+        phoneG.roundRect(-8, -16, 16, 32, 4);
+        phoneG.stroke();
+
+        const slit = new Node('Slit');
+        slit.layer = UI_2D;
+        node.addChild(slit);
+        const slitG = slit.addComponent(Graphics);
+        slitG.lineWidth = 4;
+        slitG.strokeColor = WALNUT;
+        slitG.moveTo(-3, 11);
+        slitG.lineTo(3, 11);
+        slitG.stroke();
+
+        const leftWave = new Node('LeftWave');
+        leftWave.layer = UI_2D;
+        node.addChild(leftWave);
+        const leftWaveG = leftWave.addComponent(Graphics);
+        leftWaveG.lineWidth = 4;
+        leftWaveG.strokeColor = WALNUT;
+        leftWaveG.moveTo(-17, -10);
+        leftWaveG.lineTo(-22, -4);
+        leftWaveG.lineTo(-17, 2);
+        leftWaveG.stroke();
+
+        const rightWave = new Node('RightWave');
+        rightWave.layer = UI_2D;
+        node.addChild(rightWave);
+        const rightWaveG = rightWave.addComponent(Graphics);
+        rightWaveG.lineWidth = 4;
+        rightWaveG.strokeColor = WALNUT;
+        rightWaveG.moveTo(17, -10);
+        rightWaveG.lineTo(22, -4);
+        rightWaveG.lineTo(17, 2);
+        rightWaveG.stroke();
+    }
+
+    private syncSettingsRow(card: Node, rowName: string, on: boolean): void {
+        const toggle = card.getChildByName(rowName)?.getChildByName('Toggle');
+        if (toggle) this.paintSettingsToggle(toggle, on);
+    }
+
+    private paintSettingsToggle(toggle: Node, on: boolean): void {
+        const g = toggle.getComponent(Graphics) ?? toggle.addComponent(Graphics);
+        g.clear();
+        g.fillColor = new Color(123, 88, 59, 24);
+        g.roundRect(-SETTINGS_TOGGLE_W / 2, -SETTINGS_TOGGLE_H / 2 - 3, SETTINGS_TOGGLE_W, SETTINGS_TOGGLE_H, SETTINGS_TOGGLE_H / 2);
+        g.fill();
+        const trackColor = on ? new Color(242, 111, 90, 255) : new Color(224, 206, 189, 255);
+        g.fillColor = trackColor;
+        g.roundRect(-SETTINGS_TOGGLE_W / 2, -SETTINGS_TOGGLE_H / 2, SETTINGS_TOGGLE_W, SETTINGS_TOGGLE_H, SETTINGS_TOGGLE_H / 2);
+        g.fill();
+        const knobR = 18;
+        const knobX = on ? SETTINGS_TOGGLE_W / 2 - knobR - 4 : -SETTINGS_TOGGLE_W / 2 + knobR + 4;
+        g.fillColor = new Color(123, 88, 59, 20);
+        g.circle(knobX, -2, knobR);
+        g.fill();
+        g.fillColor = Color.WHITE;
+        g.circle(knobX, 0, knobR);
+        g.fill();
     }
 
     private refreshAlbumLink() {
@@ -1242,6 +1604,7 @@ export class GameController extends Component {
     private presentLevel(level: LevelDef) {
         this.unscheduleAllCallbacks();
         this.clearFoodPress();
+        this.closeSettingsLayer();
         for (let i = 0; i < HOME_NODES.length; i++) {
             const n = this.node.getChildByName(HOME_NODES[i]);
             if (n) n.active = false;
@@ -3595,6 +3958,7 @@ export class GameController extends Component {
         const slotW = doorUi.contentSize.width;
         const slotH = doorUi.contentSize.height;
         playTrayDoorClose();
+        playTrayDoorVibration();
         tween(door)
             .delay(DOOR_SEC * 0.8)
             .call(() => {

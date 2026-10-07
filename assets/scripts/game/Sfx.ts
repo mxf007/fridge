@@ -12,6 +12,7 @@ const CLIP_UUID: Record<SfxId, string> = {
 };
 
 export const SFX_ENABLED_KEY = 'fridge_sfx';
+export const VIBRATION_ENABLED_KEY = 'fridge_vibration';
 
 const clips = new Map<SfxId, AudioClip>();
 let preload: Promise<void> | null = null;
@@ -25,6 +26,16 @@ export function isSfxEnabled(): boolean {
 
 export function setSfxEnabled(on: boolean): void {
     sys.localStorage.setItem(SFX_ENABLED_KEY, on ? '1' : '0');
+}
+
+export function isVibrationEnabled(): boolean {
+    const v = sys.localStorage.getItem(VIBRATION_ENABLED_KEY);
+    if (v == null) return true;
+    return v !== '0' && v !== 'false';
+}
+
+export function setVibrationEnabled(on: boolean): void {
+    sys.localStorage.setItem(VIBRATION_ENABLED_KEY, on ? '1' : '0');
 }
 
 function loadClip(uuid: string): Promise<AudioClip | null> {
@@ -97,4 +108,46 @@ export function playFridgeDrop(): void {
 /** 冰箱格封门合上（容量凑满关门动画）。 */
 export function playTrayDoorClose(): void {
     playSfx('bx_open');
+}
+
+/** 单格收满关门时给一次轻振，预览环境降级用浏览器振动。 */
+export function playTrayDoorVibration(): void {
+    if (!isVibrationEnabled()) return;
+    const host = globalThis as {
+        wx?: MiniGameVibrationApi;
+        tt?: MiniGameVibrationApi;
+        qq?: MiniGameVibrationApi;
+        swan?: MiniGameVibrationApi;
+        my?: MiniGameVibrationApi;
+        navigator?: BrowserVibrationApi;
+    };
+    const mini = host.wx || host.tt || host.qq || host.swan || host.my;
+    if (mini?.vibrateShort) {
+        try {
+            mini.vibrateShort({ type: 'light' });
+            return;
+        } catch {
+            try {
+                mini.vibrateShort();
+                return;
+            } catch {
+                // fall through to browser vibration
+            }
+        }
+    }
+    if (typeof host.navigator?.vibrate === 'function') {
+        try {
+            host.navigator.vibrate(18);
+        } catch {
+            // Ignore preview environments without vibration support.
+        }
+    }
+}
+
+interface MiniGameVibrationApi {
+    vibrateShort?: (options?: { type?: 'light' | 'medium' | 'heavy' }) => void;
+}
+
+interface BrowserVibrationApi {
+    vibrate?: (pattern: number | number[]) => boolean;
 }

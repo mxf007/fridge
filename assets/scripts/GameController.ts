@@ -156,7 +156,6 @@ const UUID = {
     albumDoor: 'e3022f55-9340-4b85-ae10-2091d7f20062@f9941',
     albumDoorWide: 'e3032f55-9340-4b85-ae10-2091d7f20063@f9941',
     albumBadge: 'e3072f55-9340-4b85-ae10-2091d7f20067@f9941',
-    albumPanelBg: '4b8c4d1f-8d8c-4c2e-a1d4-2b34d618b101@f9941',
     albumBackBtn: '4b8c4d1f-8d8c-4c2e-a1d4-2b34d618b102@f9941',
     albumTitle: '119cb1fd-93cd-436b-b680-63f979d72451@f9941',
     homeSettings: '6d3c99ac-d73a-44bd-a6a9-543c9ee64001@f9941',
@@ -176,6 +175,11 @@ const SETTINGS_TOGGLE_H = 44;
 const CLEARED_KEY = 'fridge_cleared';
 const MILESTONE_KEY = (n: number) => `fridge_milestone_${n}`;
 const MILESTONE_NS = [10, 20, 30];
+/** 图鉴主面板尺寸（相对原 980 加高 200 试看）。 */
+const ALBUM_PANEL_W = 640;
+const ALBUM_PANEL_H = 1180;
+/** 返回钮距面板底约 50px。 */
+const ALBUM_CLOSE_Y = -ALBUM_PANEL_H / 2 + 50;
 /** 图鉴按住分享。滑动列表里 260ms 会误触，规格改为 500ms。 */
 const ALBUM_LONG_PRESS_MS = 500;
 /** 位移超过这个值才当滑动，取消点按和长按。 */
@@ -278,7 +282,6 @@ export class GameController extends Component {
     private albumDoor: SpriteFrame | null = null;
     private albumDoorWide: SpriteFrame | null = null;
     private albumBadge: SpriteFrame | null = null;
-    private albumPanelBg: SpriteFrame | null = null;
     private albumBackBtn: SpriteFrame | null = null;
     private albumTitle: SpriteFrame | null = null;
     private homeSettings: SpriteFrame | null = null;
@@ -820,6 +823,36 @@ export class GameController extends Component {
         });
     }
 
+    /** 图鉴主面板：奶油底 + 胡桃木框，与 UI §6.5 一致，不依赖位图底。 */
+    private drawAlbumPanelBg(panel: Node): void {
+        const w = ALBUM_PANEL_W;
+        const h = ALBUM_PANEL_H;
+        const r = 36;
+        const bg = new Node('PanelBg');
+        bg.layer = UI_2D;
+        bg.addComponent(UITransform).setContentSize(w, h);
+        const g = bg.addComponent(Graphics);
+        g.fillColor = new Color(61, 50, 41, 52);
+        g.roundRect(-w / 2 + 5, -h / 2 - 8, w, h, r);
+        g.fill();
+        g.fillColor = MILK;
+        g.roundRect(-w / 2, -h / 2, w, h, r);
+        g.fill();
+        g.fillColor = CREAM;
+        g.roundRect(-w / 2 + 10, -h / 2 + 10, w - 20, h - 20, Math.max(24, r - 6));
+        g.fill();
+        g.lineWidth = 9;
+        g.strokeColor = FRAME;
+        g.roundRect(-w / 2, -h / 2, w, h, r);
+        g.stroke();
+        g.lineWidth = 5;
+        g.strokeColor = WALNUT;
+        g.roundRect(-w / 2 + 10, -h / 2 + 10, w - 20, h - 20, Math.max(26, r - 4));
+        g.stroke();
+        panel.addChild(bg);
+        bg.setSiblingIndex(0);
+    }
+
     private mountAlbumShell(token: number): {
         layer: Node;
         content: Node;
@@ -862,15 +895,8 @@ export class GameController extends Component {
         const panel = new Node('Panel');
         panel.layer = UI_2D;
         panel.setPosition(0, 20, 0);
-        panel.addComponent(UITransform).setContentSize(640, 980);
-        if (this.albumPanelBg) {
-            this.addSprite(panel, 'Bg', this.albumPanelBg, 740, 1140, 0, 0, Color.WHITE);
-        } else {
-            const pg = panel.addComponent(Graphics);
-            pg.fillColor = CREAM;
-            pg.roundRect(-320, -490, 640, 980, 36);
-            pg.fill();
-        }
+        panel.addComponent(UITransform).setContentSize(ALBUM_PANEL_W, ALBUM_PANEL_H);
+        this.drawAlbumPanelBg(panel);
         layer.addChild(panel);
         panel.on(Node.EventType.TOUCH_END, () => {}, this);
 
@@ -971,9 +997,9 @@ export class GameController extends Component {
         }
 
         const close = this.albumBackBtn
-            ? this.addSprite(panel, 'Close', this.albumBackBtn, 160, 62, 0, -440, Color.WHITE)
+            ? this.addSprite(panel, 'Close', this.albumBackBtn, 160, 62, 0, ALBUM_CLOSE_Y, Color.WHITE)
             : this.addLabel(panel, 'Close', '返回', 28, new Color(107, 74, 58, 180), 160, 40);
-        close.setPosition(0, -440, 0);
+        close.setPosition(0, ALBUM_CLOSE_Y, 0);
         this.bindHudPress(close, () => {
             if (layer.isValid) layer.destroy();
         });
@@ -1489,7 +1515,6 @@ export class GameController extends Component {
             this.loadSlot(this.albumDoor, UUID.albumDoor, (frame) => { this.albumDoor = frame; }),
             this.loadSlot(this.albumDoorWide, UUID.albumDoorWide, (frame) => { this.albumDoorWide = frame; }),
             this.loadSlot(this.albumBadge, UUID.albumBadge, (frame) => { this.albumBadge = frame; }),
-            this.loadSlot(this.albumPanelBg, UUID.albumPanelBg, (frame) => { this.albumPanelBg = frame; }),
             this.loadSlot(this.albumBackBtn, UUID.albumBackBtn, (frame) => { this.albumBackBtn = frame; }),
             this.loadSlot(this.albumTitle, UUID.albumTitle, (frame) => { this.albumTitle = frame; }),
         ]).then(() => undefined);

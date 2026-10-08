@@ -153,7 +153,7 @@ const UUID = {
     builtin: '20835ba4-6145-4fbc-a58a-051ce700aa3e@f9941',
 };
 
-const HOME_NODES = ['Bg', 'Title', 'BtnStart', 'MergeHomeBtn', 'AlbumLink', 'HomeBarMask', 'HomeBtnCover', 'BtnSettings'];
+const HOME_NODES = ['Bg', 'BxTitle', 'BtnStart', 'MergeHomeBtn', 'AlbumLink', 'HomeBarMask', 'HomeBtnCover', 'BtnSettings'];
 /** 主页三颗按钮同一尺寸。奶油卡片放得下三颗 420×84，间距 16。 */
 const HOME_BTN_W = 420;
 const HOME_BTN_H = 84;
@@ -179,6 +179,11 @@ const ALBUM_LONG_PRESS_MS = 500;
 const ALBUM_SCROLL_SLOP = 14;
 /** 食材位移超过这个值才从点选变成拖动。 */
 const DRAG_SLOP = 14;
+/** 对局顶栏「第 N 关」胶囊。 */
+const LEVEL_PILL_W = 252;
+const LEVEL_PILL_H = 72;
+const LEVEL_LABEL_FONT = 36;
+const LEVEL_LABEL_LINE = 46;
 
 type FoodDragSource = { kind: 'bag'; col: number } | { kind: 'buffer'; index: number };
 
@@ -421,7 +426,7 @@ export class GameController extends Component {
             openMergeGame(this.node, () => {
                 for (let i = 0; i < HOME_NODES.length; i++) {
                     const homeNode = this.node.getChildByName(HOME_NODES[i]);
-                    if (homeNode) homeNode.active = HOME_NODES[i] !== 'Title';
+                    if (homeNode) homeNode.active = true;
                 }
                 this.polishHomeChrome();
                 this.refreshAlbumLink();
@@ -540,6 +545,20 @@ export class GameController extends Component {
         bg.setPosition(0, 0, 0);
     }
 
+    /** 三颗按钮 y 与 HomeBtnCover 重叠，必须画在遮罩上面，否则运行时会「按钮消失」。 */
+    private liftHomeButtonsAboveCover(): void {
+        const cover = this.node.getChildByName('HomeBtnCover');
+        if (!cover) return;
+        let idx = cover.getSiblingIndex() + 1;
+        for (const name of ['MergeHomeBtn', 'BtnStart', 'AlbumLink']) {
+            const n = this.node.getChildByName(name);
+            if (n?.isValid) {
+                n.setSiblingIndex(idx);
+                idx += 1;
+            }
+        }
+    }
+
     /** 背景图里画死了一颗开始按钮，三颗重排前先用奶油色盖住。 */
     private ensureHomeBtnCover(): void {
         let cover = this.node.getChildByName('HomeBtnCover');
@@ -604,6 +623,7 @@ export class GameController extends Component {
                 }
             }
             btn.setPosition(0, startY, 0);
+            btn.active = true;
         }
         const album = this.node.getChildByName('AlbumLink');
         if (album) {
@@ -642,11 +662,17 @@ export class GameController extends Component {
             album.setPosition(0, albumY, 0);
             album.setSiblingIndex(this.node.children.length - 1);
         }
+        this.liftHomeButtonsAboveCover();
         const mask = this.node.getChildByName('HomeBarMask');
         if (mask) mask.active = false;
         const settingsBtn = this.ensureHomeSettingsBtn();
         settingsBtn.setPosition(HOME_SETTINGS_X, HOME_SETTINGS_Y, 0);
         settingsBtn.active = true;
+        const bxTitle = this.node.getChildByName('BxTitle');
+        if (bxTitle) {
+            bxTitle.active = true;
+            bxTitle.setSiblingIndex(settingsBtn.getSiblingIndex());
+        }
         this.closeSettingsLayer();
     }
 
@@ -1722,17 +1748,31 @@ export class GameController extends Component {
         const pill = new Node('LevelPill');
         pill.layer = UI_2D;
         pill.setPosition(0, y, 0);
-        pill.addComponent(UITransform).setContentSize(200, 56);
+        const pillR = LEVEL_PILL_H / 2;
+        pill.addComponent(UITransform).setContentSize(LEVEL_PILL_W, LEVEL_PILL_H);
         const g = pill.addComponent(Graphics);
         g.fillColor = MILK;
-        g.roundRect(-100, -28, 200, 56, 28);
+        g.roundRect(-LEVEL_PILL_W / 2, -pillR, LEVEL_PILL_W, LEVEL_PILL_H, pillR);
         g.fill();
         g.lineWidth = 2;
         g.strokeColor = new Color(107, 74, 58, 64);
-        g.roundRect(-100, -28, 200, 56, 28);
+        g.roundRect(-LEVEL_PILL_W / 2, -pillR, LEVEL_PILL_W, LEVEL_PILL_H, pillR);
         g.stroke();
         parent.addChild(pill);
-        this.addLabel(pill, 'LevelLabel', `第 ${this.board ? this.board.level.id : 1} 关`, 28, WALNUT, 180, 40);
+        const lv = this.addLabel(
+            pill,
+            'LevelLabel',
+            `第 ${this.board ? this.board.level.id : 1} 关`,
+            LEVEL_LABEL_FONT,
+            WALNUT,
+            LEVEL_PILL_W - 20,
+            LEVEL_LABEL_LINE,
+        );
+        const lvLabel = lv.getComponent(Label);
+        if (lvLabel) {
+            lvLabel.lineHeight = LEVEL_LABEL_LINE;
+            lvLabel.fontFamily = 'Microsoft YaHei';
+        }
 
         const home = this.addHudRoundBtn(parent, 'BtnHome', -312, y);
         this.paintHomeIcon(home);
@@ -1923,7 +1963,7 @@ export class GameController extends Component {
         for (let i = 0; i < HOME_NODES.length; i++) {
             const n = this.node.getChildByName(HOME_NODES[i]);
             if (!n) continue;
-            n.active = HOME_NODES[i] !== 'Title';
+            n.active = true;
         }
         this.refreshAlbumLink();
         this.polishHomeChrome();

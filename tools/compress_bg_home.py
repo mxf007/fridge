@@ -7,7 +7,6 @@ from pathlib import Path
 from PIL import Image
 
 ROOT = Path(__file__).resolve().parents[1]
-COLORS = 256
 
 PRESETS: dict[str, list[Path]] = {
     "bg_home": [
@@ -16,16 +15,23 @@ PRESETS: dict[str, list[Path]] = {
     ],
     "bg_play": [
         ROOT / "assets" / "ui" / "scene" / "bg_play.png",
-        ROOT / "docs" / "v1" / "scene" / "bg_play.png",
     ],
 }
 
+DEFAULT_OPTS = {"colors": 256, "size": None}
+PRESET_OPTS: dict[str, dict] = {
+    "bg_home": {"colors": 256, "size": None},
+    "bg_play": {"colors": 28, "size": (720, 1280)},
+}
 
-def compress(path: Path) -> tuple[int, int]:
+
+def compress(path: Path, *, colors: int, size: tuple[int, int] | None) -> tuple[int, int]:
     before = path.stat().st_size
     im = Image.open(path).convert("RGB")
+    if size is not None and im.size != size:
+        im = im.resize(size, Image.Resampling.LANCZOS)
     q = im.quantize(
-        colors=COLORS,
+        colors=colors,
         method=Image.Quantize.MEDIANCUT,
         dither=Image.Dither.FLOYDSTEINBERG,
     )
@@ -33,7 +39,8 @@ def compress(path: Path) -> tuple[int, int]:
     fd_path = path.with_suffix(".png.tmp")
     out.save(fd_path, "PNG", optimize=True, compress_level=9)
     after = fd_path.stat().st_size
-    if after >= before:
+    force = size is not None or colors < 256
+    if after >= before and not force:
         fd_path.unlink(missing_ok=True)
         return before, before
     fd_path.replace(path)
@@ -47,11 +54,12 @@ def main() -> None:
         if not paths:
             print("unknown preset", name, "— choose:", ", ".join(PRESETS))
             continue
+        opts = {**DEFAULT_OPTS, **PRESET_OPTS.get(name, {})}
         for path in paths:
             if not path.is_file():
                 print("skip", path)
                 continue
-            before, after = compress(path)
+            before, after = compress(path, colors=opts["colors"], size=opts["size"])
             pct = 100 * (1 - after / before) if before else 0
             print(f"{path.relative_to(ROOT)}: {before} -> {after} ({pct:.1f}% smaller)")
 

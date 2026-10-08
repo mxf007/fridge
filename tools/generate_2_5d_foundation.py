@@ -30,16 +30,6 @@ def noisy_fill(size: tuple[int, int], base: tuple[int, int, int], amount: int, s
     return image.filter(ImageFilter.GaussianBlur(0.45))
 
 
-def make_wall() -> Image.Image:
-    image = noisy_fill((720, 1280), (241, 225, 203), 4, 2109)
-    overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
-    draw = ImageDraw.Draw(overlay)
-    for y in range(1280):
-        alpha = int(18 * (y / 1280))
-        draw.line((0, y, 720, y), fill=(173, 132, 96, alpha))
-    return Image.alpha_composite(image.convert("RGBA"), overlay)
-
-
 def make_worktop_top() -> Image.Image:
     image = Image.new("RGBA", (720, 380), (0, 0, 0, 0))
     shadow = Image.new("RGBA", image.size, (0, 0, 0, 0))
@@ -188,7 +178,6 @@ def save(path: Path, image: Image.Image, uuid: str, has_alpha: bool = True) -> N
 
 
 def main() -> None:
-    save(SCENE / "bg_play_wall.png", make_wall(), "d1012f55-9340-4b85-ae10-2091d7f20001")
     save(SCENE / "worktop_top.png", make_worktop_top(), "d1022f55-9340-4b85-ae10-2091d7f20002")
     save(SCENE / "worktop_front.png", make_worktop_front(), "d1032f55-9340-4b85-ae10-2091d7f20003")
     save(BAG / "bag_hidden.png", make_hidden_tray(), "d1052f55-9340-4b85-ae10-2091d7f20005")

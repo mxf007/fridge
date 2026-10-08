@@ -303,7 +303,7 @@ y 1040–1260  柜台木板（第 10 关起，高 220）
 
 | 文件 | 用途 |
 |------|------|
-| `scene/bg_play_wall.png` | 暖墙远景 |
+| `scene/bg_play.png` | 对局全屏背景 |
 | `scene/worktop_top.png` | 台面顶（浅橡木，和案板同一路） |
 | `scene/worktop_front.png` | 台面前立（同一块木头的立面） |
 | `board/tray_empty.png` 等 | 木框内腔 / 封门等 |

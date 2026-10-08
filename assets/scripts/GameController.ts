@@ -127,7 +127,6 @@ const UUID = {
     bagWatermelon: '701c53b4-de68-419f-8a05-c26d4e81bf53@f9941',
     bagCoconut: '812d64c5-ef79-42a0-8b16-d37e5f92c064@f9941',
     bgPlay: 'b4d8e2a0-6c19-4f3b-91d7-5e8a0c2f4b63@f9941',
-    bgPlayWall: 'd1012f55-9340-4b85-ae10-2091d7f20001@f9941',
     worktopTop: 'd1022f55-9340-4b85-ae10-2091d7f20002@f9941',
     worktopFront: 'd1032f55-9340-4b85-ae10-2091d7f20003@f9941',
     propBoard: 'd1202f55-9340-4b85-ae10-2091d7f20020@f9941',
@@ -281,7 +280,6 @@ export class GameController extends Component {
     private playRoot: Node | null = null;
     private builtin: SpriteFrame | null = null;
     private bgPlay: SpriteFrame | null = null;
-    private bgPlayWall: SpriteFrame | null = null;
     private worktopTop: SpriteFrame | null = null;
     private worktopFront: SpriteFrame | null = null;
     private propBoard: SpriteFrame | null = null;
@@ -1498,7 +1496,6 @@ export class GameController extends Component {
             this.loadSlot(this.winPerfect, UUID.winPerfect, (frame) => { this.winPerfect = frame; }),
             this.loadSlot(this.shareWin, UUID.shareWin, (frame) => { this.shareWin = frame; }),
             this.loadSlot(this.shareMilestone, UUID.shareMilestone, (frame) => { this.shareMilestone = frame; }),
-            this.loadSlot(this.bgPlayWall, UUID.bgPlayWall, (frame) => { this.bgPlayWall = frame; }),
             this.loadSlot(this.bufferBoard, UUID.bufferBoard, (frame) => { this.bufferBoard = frame; }),
         ]).then(() => undefined);
     }
@@ -1614,8 +1611,8 @@ export class GameController extends Component {
         const rootUi = root.getComponent(UITransform);
         if (rootUi) rootUi.setContentSize(size.w, size.h);
 
-        const wall = this.bgPlay || this.bgPlayWall;
-        this.addSprite(root, 'PlayBgWall', wall || this.builtin, size.w, size.h, 0, 0, wall ? Color.WHITE : CREAM);
+        const playBg = this.bgPlay;
+        this.addSprite(root, 'PlayBgWall', playBg || this.builtin, size.w, size.h, 0, 0, playBg ? Color.WHITE : CREAM);
         this.drawTrays(root, board);
         this.drawPropBoard(root);
         this.drawWorktopBack(root);
@@ -3106,11 +3103,9 @@ export class GameController extends Component {
         wrap.addComponent(UITransform).setContentSize(BUF_BOARD_W, BUF_BOARD_H);
         root.addChild(wrap);
         const wood = this.addSprite(wrap, 'Wood', this.bufferBoard || this.builtin, BUF_BOARD_W, BUF_BOARD_H, 0, 0, Color.WHITE);
-        // 柜台图必须按原图像素对齐，避免裁切/拉伸把左右格中心拉开
+        // 贴图可半分辨率；固定 720×220 等比铺满，三格中心仍用 BUF_WELL_XS
         const woodSp = wood.getComponent(Sprite);
-        if (woodSp) woodSp.sizeMode = Sprite.SizeMode.RAW;
-        const woodUi = wood.getComponent(UITransform);
-        if (woodUi) woodUi.setContentSize(BUF_BOARD_W, BUF_BOARD_H);
+        if (woodSp) woodSp.sizeMode = Sprite.SizeMode.CUSTOM;
 
         const plaqueW = 300;
         const plaqueH = 52;

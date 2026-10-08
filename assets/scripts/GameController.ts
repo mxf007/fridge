@@ -88,6 +88,13 @@ const TRAY_FOOD_H = 70;
 const SLOT_MILK_ASPECT = 254 / 203;
 /** 购物袋 / 横格冰箱内 food_milk 高盒，宽÷高。 */
 const PLATE_MILK_ASPECT = 0.575;
+/** fx/hand_point.png 源尺寸；显示宽由引导场景定，高按比例，避免拉伸。 */
+const HAND_POINT_W = 129;
+const HAND_POINT_H = 153;
+const L1_HAND_W = 118;
+const L1_HAND_H = Math.round(L1_HAND_W * HAND_POINT_H / HAND_POINT_W);
+const SWITCH_HAND_W = 108;
+const SWITCH_HAND_H = Math.round(SWITCH_HAND_W * HAND_POINT_H / HAND_POINT_W);
 const TRAY_FOOD_GAP = 4;
 const FLY_SEC = 0.22;
 const DOOR_SEC = 0.28;
@@ -2538,7 +2545,7 @@ export class GameController extends Component {
         const base = tray.position;
         const rest = new Vec3(base.x + m.outerW / 2 - 8, base.y - m.outerH / 2 + 96, 0);
         const tap = new Vec3(base.x + m.outerW / 2 - 28, base.y - m.outerH / 2 + 76, 0);
-        const hand = this.addSprite(root || tray, 'SwitchHand', this.handPoint || this.builtin, 108, 120, rest.x, rest.y, Color.WHITE);
+        const hand = this.addSprite(root || tray, 'SwitchHand', this.handPoint || this.builtin, SWITCH_HAND_W, SWITCH_HAND_H, rest.x, rest.y, Color.WHITE);
         if (root) hand.setSiblingIndex(root.children.length - 1);
         tween(hand)
             .to(0.45, { position: tap }, { easing: easing.sineInOut })
@@ -2950,7 +2957,7 @@ export class GameController extends Component {
     private drawL1Guide(colNode: Node, layoutW: number, topLocalY: number) {
         const rest = new Vec3(layoutW / 2 + 36, topLocalY + 64, 0);
         const tap = new Vec3(layoutW / 2 + 16, topLocalY + 44, 0);
-        const hand = this.addSprite(colNode, 'L1Hand', this.handPoint || this.builtin, 118, 132, rest.x, rest.y, Color.WHITE);
+        const hand = this.addSprite(colNode, 'L1Hand', this.handPoint || this.builtin, L1_HAND_W, L1_HAND_H, rest.x, rest.y, Color.WHITE);
         tween(hand)
             .to(0.45, { position: tap }, { easing: easing.sineInOut })
             .to(0.45, { position: rest }, { easing: easing.sineInOut })

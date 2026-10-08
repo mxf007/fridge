@@ -141,6 +141,7 @@ const UUID = {
     trayEmpty: '6f229be7-9378-4d91-a617-1d2d45218e74@f9941',
     traySealed: '8085b3c5-21f0-4bcc-b990-c97f4c899dca@f9941',
     iconUndo: '73fbe16c-3f5c-4230-854b-1948ab7cf28f@f9941',
+    iconHome: 'c9f5b2d3-4e5f-6a7b-8c9d-0e1f2a3b4c5d@f9941',
     iconHint: '9be83f96-829c-4c60-9e25-590aa93e4e46@f9941',
     handPoint: 'e1c12f55-9340-4b85-ae10-2091d7f20051@f9941',
     winPerfect: 'd1312f55-9340-4b85-ae10-2091d7f20031@f9941',
@@ -149,19 +150,15 @@ const UUID = {
     albumDoor: 'e3022f55-9340-4b85-ae10-2091d7f20062@f9941',
     albumDoorWide: 'e3032f55-9340-4b85-ae10-2091d7f20063@f9941',
     albumBadge: 'e3072f55-9340-4b85-ae10-2091d7f20067@f9941',
+    albumPanelBg: '4b8c4d1f-8d8c-4c2e-a1d4-2b34d618b101@f9941',
+    albumBackBtn: '4b8c4d1f-8d8c-4c2e-a1d4-2b34d618b102@f9941',
+    albumTitle: '119cb1fd-93cd-436b-b680-63f979d72451@f9941',
+    homeSettings: '6d3c99ac-d73a-44bd-a6a9-543c9ee64001@f9941',
     btnStart: 'c2a1b3d4-e5f6-4789-8012-3f4a5b6c7d8e@f9941',
     builtin: '20835ba4-6145-4fbc-a58a-051ce700aa3e@f9941',
 };
 
-const HOME_NODES = ['Bg', 'BxTitle', 'BtnStart', 'MergeHomeBtn', 'AlbumLink', 'HomeBarMask', 'HomeBtnCover', 'BtnSettings'];
-/** 主页三颗按钮同一尺寸。奶油卡片放得下三颗 420×84，间距 16。 */
-const HOME_BTN_W = 420;
-const HOME_BTN_H = 84;
-const HOME_BTN_GAP = 16;
-/** 最底一颗胶囊底边 y（Cocos 中心原点）。 */
-const HOME_BTN_BOTTOM_Y = -664;
-/** 三颗按钮背后奶油遮罩中心 y。 */
-const HOME_BTN_COVER_Y = -478;
+const HOME_NODES = ['Bg', 'BxTitle', 'HomeSubTitle', 'GameList', 'BtnSettings'];
 const HOME_SETTINGS_X = -268;
 const HOME_SETTINGS_Y = 538;
 const SETTINGS_BTN_W = 96;
@@ -257,6 +254,9 @@ export class GameController extends Component {
     iconUndo: SpriteFrame | null = null;
 
     @property({ type: SpriteFrame })
+    iconHome: SpriteFrame | null = null;
+
+    @property({ type: SpriteFrame })
     iconHint: SpriteFrame | null = null;
     private handPoint: SpriteFrame | null = null;
 
@@ -272,6 +272,10 @@ export class GameController extends Component {
     private albumDoor: SpriteFrame | null = null;
     private albumDoorWide: SpriteFrame | null = null;
     private albumBadge: SpriteFrame | null = null;
+    private albumPanelBg: SpriteFrame | null = null;
+    private albumBackBtn: SpriteFrame | null = null;
+    private albumTitle: SpriteFrame | null = null;
+    private homeSettings: SpriteFrame | null = null;
 
     private board: BoardState | null = null;
     private playRoot: Node | null = null;
@@ -348,6 +352,9 @@ export class GameController extends Component {
         void this.loadSlot(this.btnStart, UUID.btnStart, (frame) => { this.btnStart = frame; }).then(() => {
             if (this.node && this.node.isValid) this.polishHomeChrome();
         });
+        void this.loadSlot(this.homeSettings, UUID.homeSettings, (frame) => { this.homeSettings = frame; }).then(() => {
+            if (this.node && this.node.isValid) this.polishHomeChrome();
+        });
     }
 
     /** 预览控制台：gm(24) 之后点「开始收拾」进第 24 关。gm(0) 取消。 */
@@ -373,13 +380,21 @@ export class GameController extends Component {
 
     private bindHome() {
         const btn = this.node.getChildByName('BtnStart');
-        if (!btn) return;
-        if (!btn.getComponent(Button)) btn.addComponent(Button);
-        btn.off(Node.EventType.TOUCH_END);
-        btn.on(Node.EventType.TOUCH_END, () => {
+        const startGame = () => {
             playBtnClick();
             this.startLevel(this.continueLevel());
-        }, this);
+        };
+        if (btn) {
+            if (!btn.getComponent(Button)) btn.addComponent(Button);
+            btn.off(Node.EventType.TOUCH_END);
+            btn.on(Node.EventType.TOUCH_END, startGame, this);
+        }
+        const vegMergeBtn = this.node.getChildByName('GameList')?.getChildByName('ModeVegMergeBtn');
+        if (vegMergeBtn) {
+            if (!vegMergeBtn.getComponent(Button)) vegMergeBtn.addComponent(Button);
+            vegMergeBtn.off(Node.EventType.TOUCH_END);
+            vegMergeBtn.on(Node.EventType.TOUCH_END, startGame, this);
+        }
         const album = this.node.getChildByName('AlbumLink');
         if (album) {
             if (!album.getComponent(Button)) album.addComponent(Button);
@@ -389,50 +404,46 @@ export class GameController extends Component {
                 this.openAlbum();
             }, this);
         }
-        this.polishHomeChrome();
-        this.refreshAlbumLink();
-    }
-
-    /** 主页「今晚大果盘」。地板上的西瓜图不再作为入口。 */
-    private ensureMergeHomeBtn(): Node {
-        const old = this.node.getChildByName('MergeEntry');
-        if (old) old.destroy();
-        let btn = this.node.getChildByName('MergeHomeBtn');
-        if (!btn) {
-            btn = new Node('MergeHomeBtn');
-            btn.layer = UI_2D;
-            this.node.addChild(btn);
+        const matchBtn = this.node.getChildByName('GameList')?.getChildByName('ModeMatchBtn');
+        if (matchBtn) {
+            if (!matchBtn.getComponent(Button)) matchBtn.addComponent(Button);
+            matchBtn.off(Node.EventType.TOUCH_END);
+            matchBtn.on(Node.EventType.TOUCH_END, () => {
+                playBtnClick();
+                this.openAlbum();
+            }, this);
         }
-        this.paintHomePill(btn, HOME_BTN_W, HOME_BTN_H, SAGE);
-        let labelNode = btn.getChildByName('Label');
-        if (!labelNode) labelNode = this.addLabel(btn, 'Label', '今晚大果盘', 30, MILK, HOME_BTN_W - 48, 44);
-        const label = labelNode.getComponent(Label);
-        if (label) {
-            label.string = '今晚大果盘';
-            label.color = MILK;
-            label.fontSize = 30;
-            label.lineHeight = 40;
-            label.fontFamily = 'Microsoft YaHei';
+        const settingsBtn = this.node.getChildByName('BtnSettings');
+        if (settingsBtn) {
+            this.bindHudPress(settingsBtn, () => {
+                const open = this.node.getChildByName('SettingsLayer');
+                if (open) return;
+                this.openSettingsLayer();
+            });
         }
-        if (!btn.getComponent(Button)) btn.addComponent(Button);
-        btn.off(Node.EventType.TOUCH_END);
-        btn.on(Node.EventType.TOUCH_END, () => {
-            playBtnClick();
-            this.closeSettingsLayer();
-            for (let i = 0; i < HOME_NODES.length; i++) {
-                const homeNode = this.node.getChildByName(HOME_NODES[i]);
-                if (homeNode) homeNode.active = false;
-            }
-            openMergeGame(this.node, () => {
+        const merge = this.node.getChildByName('GameList')?.getChildByName('MergeHomeBtn');
+        if (merge) {
+            if (!merge.getComponent(Button)) merge.addComponent(Button);
+            merge.off(Node.EventType.TOUCH_END);
+            merge.on(Node.EventType.TOUCH_END, () => {
+                playBtnClick();
+                this.closeSettingsLayer();
                 for (let i = 0; i < HOME_NODES.length; i++) {
                     const homeNode = this.node.getChildByName(HOME_NODES[i]);
-                    if (homeNode) homeNode.active = true;
+                    if (homeNode) homeNode.active = false;
                 }
-                this.polishHomeChrome();
-                this.refreshAlbumLink();
-            });
-        }, this);
-        return btn;
+                openMergeGame(this.node, () => {
+                    for (let i = 0; i < HOME_NODES.length; i++) {
+                        const homeNode = this.node.getChildByName(HOME_NODES[i]);
+                        if (homeNode) homeNode.active = true;
+                    }
+                    this.polishHomeChrome();
+                    this.refreshAlbumLink();
+                });
+            }, this);
+        }
+        this.polishHomeChrome();
+        this.refreshAlbumLink();
     }
 
     private ensureHomeSettingsBtn(): Node {
@@ -447,39 +458,15 @@ export class GameController extends Component {
                 this.openSettingsLayer();
             });
         }
+        btn.destroyAllChildren();
+        const g = btn.getComponent(Graphics);
+        if (g) g.destroy();
         const ui = btn.getComponent(UITransform) ?? btn.addComponent(UITransform);
-        ui.setContentSize(SETTINGS_BTN_W + 20, SETTINGS_BTN_H + 20);
-        const g = btn.getComponent(Graphics) ?? btn.addComponent(Graphics);
-        g.clear();
-        const oldLabel = btn.getChildByName('Label');
-        if (oldLabel) oldLabel.destroy();
-
-        let shadow = btn.getChildByName('Shadow');
-        if (!shadow) {
-            shadow = new Node('Shadow');
-            shadow.layer = UI_2D;
-            btn.addChild(shadow);
-        }
-        shadow.setPosition(0, -10, 0);
-        this.paintSettingsCircle(shadow, SETTINGS_BTN_W, new Color(123, 88, 59, 44));
-
-        let face = btn.getChildByName('Face');
-        if (!face) {
-            face = new Node('Face');
-            face.layer = UI_2D;
-            btn.addChild(face);
-        }
-        face.setPosition(0, 0, 0);
-        this.paintSettingsCircle(face, SETTINGS_BTN_W, new Color(252, 247, 239, 255));
-
-        let gear = btn.getChildByName('Gear');
-        if (!gear) {
-            gear = new Node('Gear');
-            gear.layer = UI_2D;
-            btn.addChild(gear);
-        }
-        gear.setPosition(0, 0, 0);
-        this.paintSettingsGear(gear, 26, 18, 9, WALNUT, new Color(252, 247, 239, 255));
+        ui.setContentSize(116, 114);
+        const sp = btn.getComponent(Sprite) ?? btn.addComponent(Sprite);
+        sp.sizeMode = Sprite.SizeMode.CUSTOM;
+        sp.color = Color.WHITE;
+        if (this.homeSettings) sp.spriteFrame = this.homeSettings;
         btn.setSiblingIndex(this.node.children.length - 1);
         return btn;
     }
@@ -517,19 +504,6 @@ export class GameController extends Component {
         g.fill();
     }
 
-    private paintHomePill(node: Node, w: number, h: number, fill: Color): void {
-        const ui = node.getComponent(UITransform) ?? node.addComponent(UITransform);
-        ui.setContentSize(w, h);
-        const g = node.getComponent(Graphics) ?? node.addComponent(Graphics);
-        g.clear();
-        g.fillColor = new Color(61, 50, 41, 36);
-        g.roundRect(-w / 2, -h / 2 - 5, w, h, h / 2);
-        g.fill();
-        g.fillColor = fill;
-        g.roundRect(-w / 2, -h / 2, w, h, h / 2);
-        g.fill();
-    }
-
     /** 主页背景图按 cover 铺满可视区，避免高屏上露出纯色空白。 */
     private fitHomeBackground(): void {
         const bg = this.node.getChildByName('Bg');
@@ -538,141 +512,45 @@ export class GameController extends Component {
         const sp = bg.getComponent(Sprite);
         if (sp) sp.sizeMode = Sprite.SizeMode.CUSTOM;
         const size = this.canvasSize();
-        const srcW = 720;
-        const srcH = 1280;
+        const srcW = 750;
+        const srcH = 1296;
         const scale = Math.max(size.w / srcW, size.h / srcH);
         ui.setContentSize(srcW * scale, srcH * scale);
         bg.setPosition(0, 0, 0);
     }
 
-    /** 三颗按钮 y 与 HomeBtnCover 重叠，必须画在遮罩上面，否则运行时会「按钮消失」。 */
-    private liftHomeButtonsAboveCover(): void {
-        const cover = this.node.getChildByName('HomeBtnCover');
-        if (!cover) return;
-        let idx = cover.getSiblingIndex() + 1;
-        for (const name of ['MergeHomeBtn', 'BtnStart', 'AlbumLink']) {
-            const n = this.node.getChildByName(name);
-            if (n?.isValid) {
-                n.setSiblingIndex(idx);
-                idx += 1;
-            }
-        }
-    }
-
-    /** 背景图里画死了一颗开始按钮，三颗重排前先用奶油色盖住。 */
-    private ensureHomeBtnCover(): void {
-        let cover = this.node.getChildByName('HomeBtnCover');
-        if (!cover) {
-            cover = new Node('HomeBtnCover');
-            cover.layer = UI_2D;
-            this.node.addChild(cover);
-        }
-        const ui = cover.getComponent(UITransform) ?? cover.addComponent(UITransform);
-        ui.setContentSize(520, 190);
-        const g = cover.getComponent(Graphics) ?? cover.addComponent(Graphics);
-        g.clear();
-        g.fillColor = new Color(250, 241, 226, 255);
-        g.rect(-260, -95, 520, 190);
-        g.fill();
-        cover.setPosition(0, HOME_BTN_COVER_Y, 0);
-        const bg = this.node.getChildByName('Bg');
-        if (bg) cover.setSiblingIndex(bg.getSiblingIndex() + 1);
-    }
-
-    /** §6.1：主页三颗同尺寸胶囊，居中排在奶油卡片上。颜色仍分开。 */
+    /** 主页节点改由场景文件承载，这里只保底刷新文案和显隐。 */
     private polishHomeChrome() {
         this.fitHomeBackground();
-        this.ensureHomeBtnCover();
-        const albumY = HOME_BTN_BOTTOM_Y + HOME_BTN_H / 2;
-        const mergeY = albumY + HOME_BTN_H + HOME_BTN_GAP;
-        const startY = mergeY + HOME_BTN_H + HOME_BTN_GAP;
-        const mergeBtn = this.ensureMergeHomeBtn();
-        mergeBtn.setPosition(0, mergeY, 0);
         const btn = this.node.getChildByName('BtnStart');
         if (btn) {
-            const sp = btn.getComponent(Sprite);
-            if (sp) sp.enabled = false;
-            const stuck = btn.getComponent(Graphics);
-            if (stuck) stuck.destroy();
-            const btnUi = btn.getComponent(UITransform) ?? btn.addComponent(UITransform);
-            btnUi.setContentSize(HOME_BTN_W, HOME_BTN_H);
-            let pill = btn.getChildByName('Pill');
-            if (!pill) {
-                pill = new Node('Pill');
-                pill.layer = UI_2D;
-                btn.addChild(pill);
-            }
-            pill.setSiblingIndex(0);
-            this.paintHomePill(pill, HOME_BTN_W, HOME_BTN_H, CORAL);
             const labelNode = btn.getChildByName('Label');
             if (labelNode) {
                 labelNode.active = true;
-                labelNode.setSiblingIndex(btn.children.length - 1);
-                labelNode.setPosition(0, 0, 0);
-                const labelUi = labelNode.getComponent(UITransform);
-                if (labelUi) labelUi.setContentSize(HOME_BTN_W - 48, 44);
                 const label = labelNode.getComponent(Label);
                 if (label) {
-                    label.string = '开始收拾';
+                    label.string = '开始新玩法';
                     label.color = MILK;
-                    label.fontSize = 30;
-                    label.lineHeight = 40;
+                    label.fontSize = 32;
+                    label.lineHeight = 42;
                     label.fontFamily = 'Microsoft YaHei';
                     label.horizontalAlign = Label.HorizontalAlign.CENTER;
                     label.verticalAlign = Label.VerticalAlign.CENTER;
                 }
             }
-            btn.setPosition(0, startY, 0);
-            btn.active = true;
         }
         const album = this.node.getChildByName('AlbumLink');
-        if (album) {
-            // 这个节点上已经有 Label，不能再挂 Graphics，否则胶囊画不出来，奶白字会融进奶油底。
-            const own = album.getComponent(Label);
-            if (own) {
-                own.enabled = false;
-                own.string = '';
-            }
-            const stuck = album.getComponent(Graphics);
-            if (stuck) stuck.destroy();
-            const albumUi = album.getComponent(UITransform) ?? album.addComponent(UITransform);
-            albumUi.setContentSize(HOME_BTN_W, HOME_BTN_H);
-            let pill = album.getChildByName('Pill');
-            if (!pill) {
-                pill = new Node('Pill');
-                pill.layer = UI_2D;
-                album.addChild(pill);
-            }
-            pill.setSiblingIndex(0);
-            this.paintHomePill(pill, HOME_BTN_W, HOME_BTN_H, WALNUT);
-            let text = album.getChildByName('Label');
-            if (!text) text = this.addLabel(album, 'Label', '', 30, MILK, HOME_BTN_W - 48, 44);
-            text.setSiblingIndex(album.children.length - 1);
-            const textUi = text.getComponent(UITransform);
-            if (textUi) textUi.setContentSize(HOME_BTN_W - 48, 44);
-            const label = text.getComponent(Label);
-            if (label) {
-                label.color = MILK;
-                label.fontSize = 30;
-                label.lineHeight = 40;
-                label.fontFamily = 'Microsoft YaHei';
-                label.overflow = Label.Overflow.SHRINK;
-                label.enableWrapText = false;
-            }
-            album.setPosition(0, albumY, 0);
-            album.setSiblingIndex(this.node.children.length - 1);
-        }
-        this.liftHomeButtonsAboveCover();
+        if (album) album.active = false;
         const mask = this.node.getChildByName('HomeBarMask');
         if (mask) mask.active = false;
-        const settingsBtn = this.ensureHomeSettingsBtn();
-        settingsBtn.setPosition(HOME_SETTINGS_X, HOME_SETTINGS_Y, 0);
-        settingsBtn.active = true;
+        const settingsBtn = this.node.getChildByName('BtnSettings');
+        if (settingsBtn) settingsBtn.active = true;
         const bxTitle = this.node.getChildByName('BxTitle');
-        if (bxTitle) {
-            bxTitle.active = true;
-            bxTitle.setSiblingIndex(settingsBtn.getSiblingIndex());
-        }
+        if (bxTitle) bxTitle.active = true;
+        const subTitle = this.node.getChildByName('HomeSubTitle');
+        if (subTitle) subTitle.active = true;
+        const gameList = this.node.getChildByName('GameList');
+        if (gameList) gameList.active = true;
         this.closeSettingsLayer();
     }
 
@@ -927,11 +805,14 @@ export class GameController extends Component {
     /** 先出面板。食材图齐了再填看得见的卡片，槽位内容用存档里的种类。 */
     private openAlbum() {
         const token = ++this.albumToken;
-        const shell = this.mountAlbumShell(token);
-        if (!shell) return;
-        this.scheduleOnce(() => {
-            void this.fillAlbumCards(token, shell);
-        }, 0);
+        void this.ensureAlbumFrames().then(() => {
+            if (token !== this.albumToken || !this.node || !this.node.isValid) return;
+            const shell = this.mountAlbumShell(token);
+            if (!shell) return;
+            this.scheduleOnce(() => {
+                void this.fillAlbumCards(token, shell);
+            }, 0);
+        });
     }
 
     private mountAlbumShell(token: number): {
@@ -977,18 +858,26 @@ export class GameController extends Component {
         panel.layer = UI_2D;
         panel.setPosition(0, 20, 0);
         panel.addComponent(UITransform).setContentSize(640, 980);
-        const pg = panel.addComponent(Graphics);
-        pg.fillColor = CREAM;
-        pg.roundRect(-320, -490, 640, 980, 36);
-        pg.fill();
+        if (this.albumPanelBg) {
+            this.addSprite(panel, 'Bg', this.albumPanelBg, 740, 1140, 0, 0, Color.WHITE);
+        } else {
+            const pg = panel.addComponent(Graphics);
+            pg.fillColor = CREAM;
+            pg.roundRect(-320, -490, 640, 980, 36);
+            pg.fill();
+        }
         layer.addChild(panel);
         panel.on(Node.EventType.TOUCH_END, () => {}, this);
 
-        this.addLabel(panel, 'Title', '我收过的冰箱', 36, WALNUT, 560, 48).setPosition(0, 430, 0);
+        if (this.albumTitle) {
+            this.addSprite(panel, 'Title', this.albumTitle, 500, 110, 0, 462, Color.WHITE);
+        } else {
+            this.addLabel(panel, 'Title', '我收过的冰箱', 36, WALNUT, 560, 48).setPosition(0, 430, 0);
+        }
         const cleared = this.clearedId();
         const album = prepareAlbum(sys.localStorage, cleared, (id) => this.levelById(id));
-        this.addLabel(panel, 'Progress', `${cleared} / ${PLAYABLE.length}`, 26, SAGE, 200, 36).setPosition(0, 380, 0);
-        this.addLabel(panel, 'ReplayHint', '点一下再收 · 按住可分享', 20, FRAME, 480, 28).setPosition(0, 348, 0);
+        this.addLabel(panel, 'Progress', `${cleared} / ${PLAYABLE.length}`, 26, SAGE, 200, 36).setPosition(0, 372, 0);
+        this.addLabel(panel, 'ReplayHint', '点一下再收 · 按住可分享', 20, FRAME, 480, 28).setPosition(0, 340, 0);
 
         const cols = 3;
         const cardW = 184;
@@ -1076,7 +965,9 @@ export class GameController extends Component {
             this.addLabel(panel, 'Empty', '还没收过冰箱，先去收拾一层', 26, FRAME, 520, 40).setPosition(0, 80, 0);
         }
 
-        const close = this.addLabel(panel, 'Close', '返回', 28, new Color(107, 74, 58, 180), 160, 40);
+        const close = this.albumBackBtn
+            ? this.addSprite(panel, 'Close', this.albumBackBtn, 160, 62, 0, -440, Color.WHITE)
+            : this.addLabel(panel, 'Close', '返回', 28, new Color(107, 74, 58, 180), 160, 40);
         close.setPosition(0, -440, 0);
         this.bindHudPress(close, () => {
             if (layer.isValid) layer.destroy();
@@ -1402,12 +1293,12 @@ export class GameController extends Component {
         const g = node.getComponent(Graphics) || node.addComponent(Graphics);
         g.clear();
         const radius = 20;
-        const width = 5;
+        const width = 8;
         g.fillColor = fill;
         g.roundRect(-w / 2, -h / 2, w, h, radius);
         g.fill();
         g.lineWidth = width;
-        g.strokeColor = stroke;
+        g.strokeColor = new Color(224, 150, 92, stroke.a);
         const inset = width * 0.5;
         g.roundRect(-w / 2 + inset, -h / 2 + inset, w - width, h - width, radius - 2);
         g.stroke();
@@ -1550,6 +1441,7 @@ export class GameController extends Component {
             this.loadSlot(this.foodMilkSlot, UUID.foodMilkSlot, (frame) => { this.foodMilkSlot = frame; }),
             this.loadSlot(this.handPoint, UUID.handPoint, (frame) => { this.handPoint = frame; }),
             this.loadSlot(this.iconUndo, UUID.iconUndo, (frame) => { this.iconUndo = frame; }),
+            this.loadSlot(this.iconHome, UUID.iconHome, (frame) => { this.iconHome = frame; }),
         ]).then(() => undefined);
     }
 
@@ -1592,6 +1484,9 @@ export class GameController extends Component {
             this.loadSlot(this.albumDoor, UUID.albumDoor, (frame) => { this.albumDoor = frame; }),
             this.loadSlot(this.albumDoorWide, UUID.albumDoorWide, (frame) => { this.albumDoorWide = frame; }),
             this.loadSlot(this.albumBadge, UUID.albumBadge, (frame) => { this.albumBadge = frame; }),
+            this.loadSlot(this.albumPanelBg, UUID.albumPanelBg, (frame) => { this.albumPanelBg = frame; }),
+            this.loadSlot(this.albumBackBtn, UUID.albumBackBtn, (frame) => { this.albumBackBtn = frame; }),
+            this.loadSlot(this.albumTitle, UUID.albumTitle, (frame) => { this.albumTitle = frame; }),
         ]).then(() => undefined);
     }
 
@@ -1774,8 +1669,12 @@ export class GameController extends Component {
             lvLabel.fontFamily = 'Microsoft YaHei';
         }
 
-        const home = this.addHudRoundBtn(parent, 'BtnHome', -312, y);
-        this.paintHomeIcon(home);
+        const home = new Node('BtnHome');
+        home.layer = UI_2D;
+        home.setPosition(-312, y, 0);
+        home.addComponent(UITransform).setContentSize(88, 88);
+        parent.addChild(home);
+        this.addSprite(home, 'Icon', this.iconHome, 88, 88, 0, 0, Color.WHITE);
         this.bindHudPress(home, () => this.goHome());
 
         const showHint = !!(this.board && this.board.level.id >= 7);
@@ -1840,25 +1739,6 @@ export class GameController extends Component {
         g.stroke();
         parent.addChild(btn);
         return btn;
-    }
-
-    private paintHomeIcon(btn: Node) {
-        const icon = new Node('Icon');
-        icon.layer = UI_2D;
-        icon.addComponent(UITransform).setContentSize(56, 56);
-        const g = icon.addComponent(Graphics);
-        g.fillColor = WALNUT;
-        g.moveTo(0, 22);
-        g.lineTo(-22, 2);
-        g.lineTo(22, 2);
-        g.close();
-        g.fill();
-        g.roundRect(-16, -20, 32, 24, 4);
-        g.fill();
-        g.fillColor = MILK;
-        g.roundRect(-5, -20, 10, 14, 2);
-        g.fill();
-        btn.addChild(icon);
     }
 
     private bindHudPress(btn: Node, tap: () => void) {

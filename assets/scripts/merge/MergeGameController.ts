@@ -103,6 +103,7 @@ export class MergeGameController extends Component {
     private screenH = DESIGN_H;
     /** 水果图片层。和刚体分开，避免物理节点上的 Sprite 不绘制。 */
     private fruitLayer: Node | null = null;
+    private homeBtnSprite: Sprite | null = null;
 
     open(onClose: () => void): void {
         this.closeCallback = onClose;
@@ -317,15 +318,9 @@ export class MergeGameController extends Component {
         close.layer = UI_2D;
         close.setPosition(-304, 0);
         close.addComponent(UITransform).setContentSize(88, 88);
-        const cg = close.addComponent(Graphics);
-        cg.fillColor = MILK;
-        cg.circle(0, 0, 40);
-        cg.fill();
-        cg.lineWidth = 2;
-        cg.strokeColor = new Color(107, 74, 58, 48);
-        cg.circle(0, 0, 40);
-        cg.stroke();
-        this.paintHomeIcon(close);
+        const homeSpr = close.addComponent(Sprite);
+        homeSpr.sizeMode = Sprite.SizeMode.CUSTOM;
+        this.homeBtnSprite = homeSpr;
         close.on(Node.EventType.TOUCH_START, () => {
             tween(close).to(0.08, { scale: new Vec3(0.97, 0.97, 1) }).start();
         }, this);
@@ -722,6 +717,7 @@ export class MergeGameController extends Component {
                 if (/merge_bg/i.test(name)) bgFrame = frame;
                 if (/merge_burst/i.test(name)) this.burstFrame = frame;
                 if (name === 'merge_title') titleFrame = frame;
+                if (name === 'btn_zhuye') this.applyHomeBtn(frame);
             }
             if (this.board) {
                 for (const child of this.board.children) {
@@ -752,6 +748,11 @@ export class MergeGameController extends Component {
             });
         };
         tryLoad(0);
+    }
+
+    private applyHomeBtn(frame: SpriteFrame): void {
+        if (!this.homeBtnSprite?.isValid) return;
+        this.homeBtnSprite.spriteFrame = frame;
     }
 
     private applyBackground(frame: SpriteFrame): void {
@@ -985,26 +986,6 @@ export class MergeGameController extends Component {
         g.lineTo(0, 18);
         g.stroke();
         return node;
-    }
-
-    /** 与对局顶栏回主页相同：奶油圆钮 + 小屋。 */
-    private paintHomeIcon(btn: Node): void {
-        const icon = new Node('Icon');
-        icon.layer = UI_2D;
-        icon.addComponent(UITransform).setContentSize(56, 56);
-        const g = icon.addComponent(Graphics);
-        g.fillColor = WALNUT;
-        g.moveTo(0, 22);
-        g.lineTo(-22, 2);
-        g.lineTo(22, 2);
-        g.close();
-        g.fill();
-        g.roundRect(-16, -20, 32, 24, 4);
-        g.fill();
-        g.fillColor = MILK;
-        g.roundRect(-5, -20, 10, 14, 2);
-        g.fill();
-        btn.addChild(icon);
     }
 
     private addLabel(

@@ -9,6 +9,12 @@
     "isBundle": true,
     "bundleConfigID": "default",
     "bundleName": "resources",
-    "priority": 8
+    "priority": 8,
+    "compressionType": {
+      "wechatgame": "none"
+    },
+    "isRemoteBundle": {
+      "wechatgame": false
+    }
   }
 }

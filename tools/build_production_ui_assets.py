@@ -113,22 +113,6 @@ def main() -> None:
     set_slice_borders(shell, 92, 92, 72, 72)
 
     build(
-        "fridge-cavity-source.png",
-        BOARD / "tray_empty.png",
-        (200, 280),
-        0.015,
-        "stretch",
-        "6f229be7-9378-4d91-a617-1d2d45218e74",
-    )
-    build(
-        "fridge-block-source.png",
-        BOARD / "tray_block.png",
-        (200, 120),
-        0.015,
-        "stretch",
-        "d1082f55-9340-4b85-ae10-2091d7f20008",
-    )
-    build(
         "fridge-door-source.png",
         BOARD / "tray_door.png",
         (200, 280),

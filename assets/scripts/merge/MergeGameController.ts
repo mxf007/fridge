@@ -349,8 +349,8 @@ export class MergeGameController extends Component {
         views.addComponent(UITransform).setContentSize(DESIGN_W, DESIGN_H);
         this.node.addChild(views);
         this.board.setSiblingIndex(1);
-        views.setSiblingIndex(2);
         this.fruitLayer = views;
+        this.liftFruitLayerAboveHud();
 
         this.node.on(Input.EventType.TOUCH_START, this.onTouchStart, this);
         this.node.on(Input.EventType.TOUCH_MOVE, this.onTouchMove, this);
@@ -804,6 +804,19 @@ export class MergeGameController extends Component {
         this.node.getChildByName('ScoreShelf')?.setPosition(-10, scoreY, 0);
         this.node.getChildByName('NextToken')?.setPosition(274, scoreY, 0);
         this.node.getChildByName('BtnClose')?.setPosition(-304, scoreY, 0);
+        this.liftFruitLayerAboveHud();
+    }
+
+    /** 水果 Sprite 在 FruitViews，不在刚体节点上；该层必须盖在 ScoreShelf 之上，否则待投放水果会被分数条挡住。 */
+    private liftFruitLayerAboveHud(): void {
+        const layer = this.fruitLayer;
+        if (!layer?.isValid || !this.node.isValid) return;
+        if (this.gameOverLayer?.isValid) {
+            const idx = this.gameOverLayer.getSiblingIndex();
+            layer.setSiblingIndex(Math.max(0, idx - 1));
+            return;
+        }
+        layer.setSiblingIndex(this.node.children.length - 1);
     }
 
     lateUpdate(): void {

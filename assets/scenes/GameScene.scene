@@ -3052,7 +3052,7 @@
   },
   {
     "__type__": "cc.Node",
-    "_name": "ModeKitchenBtn",
+    "_name": "BulkPurchaseHomeBtn",
     "_objFlags": 0,
     "__editorExtras__": {},
     "_parent": {
@@ -3069,7 +3069,7 @@
         "__id__": 80
       }
     ],
-    "_active": false,
+    "_active": true,
     "_components": [
       {
         "__id__": 83
@@ -3085,7 +3085,7 @@
     "_lpos": {
       "__type__": "cc.Vec3",
       "x": 0,
-      "y": -444,
+      "y": -270,
       "z": 0
     },
     "_lrot": {
@@ -3132,7 +3132,7 @@
     "_prefab": null,
     "_lpos": {
       "__type__": "cc.Vec3",
-      "x": -236,
+      "x": -185.54,
       "y": 0,
       "z": 0
     },
@@ -3196,13 +3196,13 @@
     "_dstBlendFactor": 4,
     "_color": {
       "__type__": "cc.Color",
-      "r": 255,
-      "g": 255,
-      "b": 255,
+      "r": 170,
+      "g": 158,
+      "b": 145,
       "a": 255
     },
     "_spriteFrame": {
-      "__uuid__": "daae9542-5e08-4113-b2ab-f4f41c5837c6@f9941",
+      "__uuid__": "7b362082-193c-4dcf-8347-838b6f00e319@f9941",
       "__expectedType__": "cc.SpriteFrame"
     },
     "_type": 0,
@@ -3241,7 +3241,7 @@
     "_prefab": null,
     "_lpos": {
       "__type__": "cc.Vec3",
-      "x": 54,
+      "x": -11.878,
       "y": 24,
       "z": 0
     },
@@ -3280,7 +3280,7 @@
     "__prefab": null,
     "_contentSize": {
       "__type__": "cc.Size",
-      "width": 140,
+      "width": 190,
       "height": 45.36
     },
     "_anchorPoint": {
@@ -3310,11 +3310,11 @@
       "b": 58,
       "a": 255
     },
-    "_string": "厨房合成赛",
+    "_string": "周末大采购",
     "_horizontalAlign": 0,
     "_verticalAlign": 1,
-    "_actualFontSize": 28,
-    "_fontSize": 28,
+    "_actualFontSize": 38,
+    "_fontSize": 38,
     "_fontFamily": "Microsoft YaHei",
     "_lineHeight": 36,
     "_overflow": 0,
@@ -3373,7 +3373,7 @@
     "_prefab": null,
     "_lpos": {
       "__type__": "cc.Vec3",
-      "x": 54,
+      "x": 48.394,
       "y": -24,
       "z": 0
     },
@@ -3442,14 +3442,14 @@
       "b": 41,
       "a": 255
     },
-    "_string": "合成高级食材，解锁今晚的丰盛料理",
+    "_string": "周末超市大采购，回家规划囤货",
     "_horizontalAlign": 0,
     "_verticalAlign": 1,
     "_actualFontSize": 20,
     "_fontSize": 20,
     "_fontFamily": "Microsoft YaHei",
     "_lineHeight": 28,
-    "_overflow": 0,
+    "_overflow": 1,
     "_enableWrapText": false,
     "_font": null,
     "_isSystemFontUsed": true,
@@ -3521,9 +3521,9 @@
     "_dstBlendFactor": 4,
     "_color": {
       "__type__": "cc.Color",
-      "r": 255,
-      "g": 255,
-      "b": 255,
+      "r": 236,
+      "g": 231,
+      "b": 225,
       "a": 255
     },
     "_spriteFrame": {
@@ -4297,7 +4297,10 @@
       "__uuid__": "518eca01-d30f-4b58-8867-0cc149828d77@f9941",
       "__expectedType__": "cc.SpriteFrame"
     },
-    "foodMilkSlot": null,
+    "foodMilkSlot": {
+      "__uuid__": "9e5ad93b-2679-494e-add7-757ba66a5731@f9941",
+      "__expectedType__": "cc.SpriteFrame"
+    },
     "foodVeg": {
       "__uuid__": "daae9542-5e08-4113-b2ab-f4f41c5837c6@f9941",
       "__expectedType__": "cc.SpriteFrame"
@@ -4314,7 +4317,14 @@
       "__uuid__": "cc9a1cd4-86d6-4590-bf78-e264c01e8c06@f9941",
       "__expectedType__": "cc.SpriteFrame"
     },
-    "foodLeftover": null,
+    "foodSauceSlot": {
+      "__uuid__": "05af3e78-422b-4121-9855-dbc306e06ef6@f9941",
+      "__expectedType__": "cc.SpriteFrame"
+    },
+    "foodLeftover": {
+      "__uuid__": "733073be-ff4d-475f-81a8-a047dc179820@f9941",
+      "__expectedType__": "cc.SpriteFrame"
+    },
     "foodGrape": {
       "__uuid__": "7c4e1a90-2b3d-4f5a-9c8e-1d2f3a4b5c6d@f9941",
       "__expectedType__": "cc.SpriteFrame"

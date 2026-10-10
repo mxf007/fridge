@@ -1,20 +1,21 @@
-import { assetManager, AudioClip, AudioSource, director, Node, sys } from 'cc';
+import { AudioClip, AudioSource, director, Node, resources, sys } from 'cc';
 
-/** 不播 BGM。文件名与 assets/audio 一致。 */
+/** 不播 BGM。资源在 assets/resources/audio，跟主包一起构建。 */
 export type SfxId = 'click_btn' | 'win_tg' | 'game_failed' | 'game_df' | 'bx_open';
 
-const CLIP_UUID: Record<SfxId, string> = {
-    click_btn: 'c22d3242-2878-46b9-b627-7e553d9d77ba',
-    win_tg: 'e7b02e22-32dc-4b1e-9071-57c80d0a8b80',
-    game_failed: '641fe467-9998-4c1f-ad77-0782b46b467b',
-    game_df: '1849fa17-8d3b-4c44-bdb3-543641d938c7',
-    bx_open: 'a91e3c42-5f8b-4d1e-a6c3-8f2e5d9b1c04',
+const PATHS: Record<SfxId, string> = {
+    click_btn: 'audio/CLICK_BTN',
+    win_tg: 'audio/win_tg',
+    game_failed: 'audio/game_failed',
+    game_df: 'audio/game_df',
+    bx_open: 'audio/bx_open',
 };
 
 export const SFX_ENABLED_KEY = 'fridge_sfx';
 export const VIBRATION_ENABLED_KEY = 'fridge_vibration';
 
 const clips = new Map<SfxId, AudioClip>();
+const loading = new Set<SfxId>();
 let preload: Promise<void> | null = null;
 let source: AudioSource | null = null;
 
@@ -38,14 +39,37 @@ export function setVibrationEnabled(on: boolean): void {
     sys.localStorage.setItem(VIBRATION_ENABLED_KEY, on ? '1' : '0');
 }
 
-function loadClip(uuid: string): Promise<AudioClip | null> {
+function loadClip(id: SfxId): Promise<AudioClip | null> {
+    const cached = clips.get(id);
+    if (cached) return Promise.resolve(cached);
+    if (loading.has(id)) {
+        return new Promise((resolve) => {
+            const tick = () => {
+                const clip = clips.get(id);
+                if (clip) {
+                    resolve(clip);
+                    return;
+                }
+                if (!loading.has(id)) {
+                    resolve(null);
+                    return;
+                }
+                setTimeout(tick, 16);
+            };
+            tick();
+        });
+    }
+    loading.add(id);
     return new Promise((resolve) => {
-        assetManager.loadAny({ uuid }, (err, asset) => {
-            if (err || !asset) {
+        resources.load(PATHS[id], AudioClip, (error, clip) => {
+            loading.delete(id);
+            if (error || !clip) {
+                console.warn(`[fridge] sfx load failed: ${PATHS[id]}`, error);
                 resolve(null);
                 return;
             }
-            resolve(asset as AudioClip);
+            clips.set(id, clip);
+            resolve(clip);
         });
     });
 }
@@ -54,14 +78,8 @@ function loadClip(uuid: string): Promise<AudioClip | null> {
 export function preloadSfx(): Promise<void> {
     if (preload) return preload;
     preload = (async () => {
-        const ids = Object.keys(CLIP_UUID) as SfxId[];
-        await Promise.all(
-            ids.map(async (id) => {
-                if (clips.has(id)) return;
-                const clip = await loadClip(CLIP_UUID[id]);
-                if (clip) clips.set(id, clip);
-            }),
-        );
+        const ids = Object.keys(PATHS) as SfxId[];
+        await Promise.all(ids.map((id) => loadClip(id)));
     })();
     return preload;
 }

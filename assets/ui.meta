@@ -5,5 +5,15 @@
   "uuid": "697ffc73-e81a-43c2-b3dd-eecc52eee21b",
   "files": [],
   "subMetas": {},
-  "userData": {}
+  "userData": {
+    "isBundle": true,
+    "bundleName": "ui",
+    "priority": 1,
+    "compressionType": {
+      "wechatgame": "none"
+    },
+    "isRemoteBundle": {
+      "wechatgame": false
+    }
+  }
 }

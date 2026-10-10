@@ -16,6 +16,7 @@ import {
     Node,
     Sprite,
     SpriteFrame,
+    Texture2D,
     UIOpacity,
     UITransform,
     Vec3,
@@ -44,7 +45,10 @@ import {
 import type { AlbumGrade } from './game/AlbumState';
 import type { AlbumEntry } from './game/AlbumState';
 import type { Dest, FailReason, FoodId, HintPick, LevelDef, PlaceFail, PlaceReason } from './game/types';
-import { FOOD_NAMES } from './game/types';
+import { FOOD_IDS, FOOD_NAMES } from './game/types';
+import { BulkPurchaseState } from './bulk/BulkPurchaseState';
+import type { BulkRunDef } from './bulk/types';
+import { bulkPrototypeIndex, loadBulkPrototype, nextBulkRunId, validateBulkPrototype } from './bulk/prototypeRuns';
 import { openMergeGame } from './merge/MergeGameController';
 
 const { ccclass, property } = _decorator;
@@ -62,8 +66,27 @@ const SAGE = new Color(122, 158, 126, 255);
 /** 选中格呼吸描边：蓝主色 + 更浅外晕 */
 const SELECT_PULSE_BLUE = new Color(70, 110, 220, 255);
 const SELECT_PULSE_BLUE_SOFT = new Color(168, 186, 248, 255);
+/** 周末大采购选中：亮冰蓝，比旧款沉蓝更跳，也不走珊瑚红。 */
+const SELECT_PULSE_ICE = new Color(45, 156, 255, 255);
+const SELECT_PULSE_ICE_SOFT = new Color(130, 210, 255, 255);
 
 const Y_BUFFER = -524;
+/** 周末大采购下半区对齐主线：台面托叠盘，柜台贴底。 */
+const BULK_BAG_ZONE_Y = -300;
+const BULK_BAG_ZONE_H = 380;
+const BULK_FOOTER_Y = -614;
+/** 周末大采购上半区：2×2 大格 + 右小票，贴主线冰箱墙，不另铺大底板。 */
+const BULK_TRAY_W = 190;
+const BULK_TRAY_H = 92;
+const BULK_TRAY_GAP = 18;
+const BULK_TRAY_DX = (BULK_TRAY_W + BULK_TRAY_GAP) / 2;
+const BULK_TRAY_DY = (BULK_TRAY_H + BULK_TRAY_GAP) / 2;
+const BULK_TRAY_BLOCK_X = -80;
+const BULK_CLUSTER_Y = 288;
+const BULK_RECEIPT_W = 148;
+const BULK_RECEIPT_H = 276;
+const BULK_RECEIPT_X = 214;
+const WALNUT_SOFT = new Color(107, 74, 58, 168);
 /** ≥5 列折两排：前排靠柜台，后排靠冰箱；深栈进后排。 */
 const BAG_TWO_ROW_MIN = 5;
 const BAG_BACK_SCALE = 0.92;
@@ -73,6 +96,7 @@ const BAG_ROW_GAP = 112;
 const BAG_TOP_LIMIT = 8;
 const DESIGN_W = 720;
 const DESIGN_H = 1280;
+const BULK_PURCHASE_HOME_BTN = 'BulkPurchaseHomeBtn';
 /** buffer_board.png 720×220 上三格奶油盘：中心相对木板中心（Y 向上）。 */
 const BUF_BOARD_W = 720;
 const BUF_BOARD_H = 220;
@@ -154,8 +178,6 @@ const UUID = {
     bagTrayLower: 'd1142f55-9340-4b85-ae10-2091d7f20014@f9941',
     bagTrayTop: 'd1152f55-9340-4b85-ae10-2091d7f20015@f9941',
     bufferBoard: 'a41d431c-862d-48e8-9b57-b2cb36108f8e@f9941',
-    trayEmpty: '6f229be7-9378-4d91-a617-1d2d45218e74@f9941',
-    traySealed: '8085b3c5-21f0-4bcc-b990-c97f4c899dca@f9941',
     iconUndo: '73fbe16c-3f5c-4230-854b-1948ab7cf28f@f9941',
     iconHome: 'c9f5b2d3-4e5f-6a7b-8c9d-0e1f2a3b4c5d@f9941',
     iconHint: '9be83f96-829c-4c60-9e25-590aa93e4e46@f9941',
@@ -184,6 +206,9 @@ const SETTINGS_TOGGLE_W = 92;
 const SETTINGS_TOGGLE_H = 44;
 const CLEARED_KEY = 'fridge_cleared';
 const MILESTONE_KEY = (n: number) => `fridge_milestone_${n}`;
+const BULK_GUIDE_SEEN_KEY = 'bulk_weekend_guide_seen';
+/** 新手引导先藏着，下个版本再开。 */
+const BULK_GUIDE_ENABLED = false;
 const MILESTONE_NS = [10, 20, 30];
 /** 图鉴主面板尺寸（相对原 980 加高 200 试看）。 */
 const ALBUM_PANEL_W = 640;
@@ -219,6 +244,19 @@ type FoodPress = {
     hit: Dest | null;
     flyW: number;
     flyH: number;
+};
+
+type BulkDragCtx = {
+    card: Node;
+    demo: BulkPurchaseState;
+    bagHost: Node;
+    fridgeZone: Node;
+    getCounterPanel: () => Node | null;
+    onBagTap: (col: number) => void;
+    pourQuiet: (counterIndex: number, trayIndex: number) => boolean;
+    setTrayTarget: (index: number | null) => void;
+    setBagTarget: (target: 'tray' | 'counter') => void;
+    afterPlace: (trayIndex: number | null) => void;
 };
 
 const TOAST: Record<PlaceReason, string> = {
@@ -313,8 +351,6 @@ export class GameController extends Component {
     private bagTrayLower: SpriteFrame | null = null;
     private bagTrayTop: SpriteFrame | null = null;
     private bufferBoard: SpriteFrame | null = null;
-    private trayEmpty: SpriteFrame | null = null;
-    private traySealed: SpriteFrame | null = null;
     private btnStart: SpriteFrame | null = null;
     private bagFrames: Partial<Record<FoodId, SpriteFrame>> = {};
     private busy = false;
@@ -353,6 +389,10 @@ export class GameController extends Component {
     private albumReady: Promise<void> | null = null;
     /** 图鉴食材图。和其余关卡图分开，打开图鉴不必等胜利卡和柜台。 */
     private foodReady: Promise<void> | null = null;
+    private bulkSettleLock = false;
+    private bulkDragCtx: BulkDragCtx | null = null;
+    private bulkPress: FoodPress | null = null;
+    private bulkPulseTrayIndex: number | null = null;
     /** 图鉴缩略的格子位置。同一关、同一块区域只算一次。 */
     private albumCellCache: { [key: string]: { x: number; y: number; w: number; h: number; horizontal: boolean }[] } = {};
     private albumToken = 0;
@@ -461,6 +501,16 @@ export class GameController extends Component {
                     this.polishHomeChrome();
                     this.refreshAlbumLink();
                 });
+            }, this);
+        }
+        const bulk = this.bulkPurchaseHomeEntry();
+        if (bulk) {
+            if (!bulk.getComponent(Button)) bulk.addComponent(Button);
+            bulk.off(Node.EventType.TOUCH_END);
+            bulk.on(Node.EventType.TOUCH_END, () => {
+                playBtnClick();
+                this.closeSettingsLayer();
+                this.openBulkPurchaseLayer();
             }, this);
         }
         this.polishHomeChrome();
@@ -573,11 +623,1911 @@ export class GameController extends Component {
         const gameList = this.node.getChildByName('GameList');
         if (gameList) gameList.active = true;
         this.closeSettingsLayer();
+        this.closeBulkPurchaseLayer();
+        this.refreshBulkHomeEntry();
     }
 
     private closeSettingsLayer(): void {
         const layer = this.node.getChildByName('SettingsLayer');
         if (layer) layer.destroy();
+    }
+
+    /** 周末大采购主页入口：场景 GameList/BulkPurchaseHomeBtn，文案与布局在编辑器维护。 */
+    private bulkPurchaseHomeEntry(): Node | null {
+        const list = this.node.getChildByName('GameList');
+        if (!list) return null;
+        return list.getChildByName(BULK_PURCHASE_HOME_BTN) ?? list.getChildByName('ModeKitchenBtn');
+    }
+
+    private refreshBulkHomeEntry(): void {
+        const entry = this.bulkPurchaseHomeEntry();
+        if (!entry) return;
+        entry.active = true;
+        const bg = entry.getComponent(Sprite);
+        if (bg) bg.color = Color.WHITE;
+        const subtitle = entry.getChildByName('Subtitle');
+        const subtitleLabel = subtitle ? subtitle.getComponent(Label) : null;
+        if (subtitleLabel) subtitleLabel.color = new Color(61, 50, 41, 255);
+        const icon = entry.getChildByName('Icon');
+        const iconSprite = icon ? icon.getComponent(Sprite) : null;
+        if (iconSprite) iconSprite.color = new Color(208, 171, 118, 255);
+        const shade = entry.getChildByName('LockShade');
+        if (shade) shade.active = false;
+        const badge = entry.getChildByName('LockBadge');
+        if (badge) badge.active = false;
+    }
+
+    private showHomeToast(text: string): void {
+        const old = this.node.getChildByName('HomeToast');
+        if (old) old.destroy();
+        const toast = new Node('HomeToast');
+        toast.layer = UI_2D;
+        toast.setPosition(0, 0, 0);
+        const toastW = 560;
+        const toastH = 64;
+        toast.addComponent(UITransform).setContentSize(toastW, toastH);
+        const g = toast.addComponent(Graphics);
+        g.fillColor = new Color(61, 50, 41, 214);
+        g.roundRect(-toastW / 2, -toastH / 2, toastW, toastH, 24);
+        g.fill();
+        this.node.addChild(toast);
+        const label = this.addLabel(toast, 'Label', text, 24, MILK, toastW - 40, 36);
+        label.setPosition(0, 0, 0);
+        this.tuneLabel(label);
+        this.scheduleOnce(() => {
+            if (toast.isValid) toast.destroy();
+        }, 1.2);
+    }
+
+    private closeBulkPurchaseLayer(): void {
+        this.clearBulkPress();
+        this.bulkDragCtx = null;
+        this.bulkPulseTrayIndex = null;
+        this.busy = false;
+        const layer = this.node.getChildByName('BulkPurchaseLayer');
+        if (layer) layer.destroy();
+    }
+
+    private makeBulkPrototypeDemo(runDef: BulkRunDef, stageIndex = 0): BulkPurchaseState {
+        const demo = BulkPurchaseState.fromRun(runDef);
+        if (stageIndex > 0) demo.startStage(stageIndex);
+        demo.takeBranchCheckpoint();
+        demo.takeStageCheckpoint();
+        return demo;
+    }
+
+    private openBulkPurchaseLayer(runId?: string, stageIndex = 0): void {
+        const proto = loadBulkPrototype(runId);
+        if (!proto) {
+            this.showHomeToast('这一关还铺不出来');
+            return;
+        }
+        const stage = Math.max(0, Math.min(stageIndex, proto.run.stages.length - 1));
+        let demo: BulkPurchaseState;
+        try {
+            demo = this.makeBulkPrototypeDemo(proto.run, stage);
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            console.error(`[bulk] enter ${proto.run.id}/${stage} failed: ${message}`);
+            this.showHomeToast('这一关还铺不出来');
+            return;
+        }
+        this.closeBulkPurchaseLayer();
+        this.bulkSettleLock = false;
+        const size = this.canvasSize();
+        validateBulkPrototype(proto);
+        const layer = new Node('BulkPurchaseLayer');
+        layer.layer = UI_2D;
+        layer.addComponent(UITransform).setContentSize(size.w, size.h);
+        this.node.addChild(layer);
+
+        const dim = new Node('Dim');
+        dim.layer = UI_2D;
+        dim.setPosition(0, 0, 0);
+        dim.addComponent(UITransform).setContentSize(size.w, size.h);
+        const playBg = this.bgPlay;
+        this.addSprite(dim, 'PlayBg', playBg || this.builtin, size.w, size.h, 0, 0, playBg ? Color.WHITE : CREAM);
+        layer.addChild(dim);
+        dim.on(Node.EventType.TOUCH_START, () => {}, this);
+        dim.on(Node.EventType.TOUCH_MOVE, () => {}, this);
+        dim.on(Node.EventType.TOUCH_END, () => {}, this);
+        dim.on(Node.EventType.TOUCH_CANCEL, () => {}, this);
+
+        const card = new Node('Card');
+        card.layer = UI_2D;
+        card.setPosition(0, 0, 0);
+        card.addComponent(UITransform).setContentSize(DESIGN_W, DESIGN_H);
+        layer.addChild(card);
+
+        const topHeader = new Node('TopHeader');
+        topHeader.layer = UI_2D;
+        topHeader.setPosition(0, 0, 0);
+        topHeader.addComponent(UITransform).setContentSize(720, 160);
+        card.addChild(topHeader);
+
+        const hudY = this.hudY();
+        const home = new Node('BtnHome');
+        home.layer = UI_2D;
+        home.setPosition(-312, hudY, 0);
+        home.addComponent(UITransform).setContentSize(88, 88);
+        topHeader.addChild(home);
+        this.addSprite(home, 'Icon', this.iconHome, 88, 88, 0, 0, Color.WHITE);
+        this.bindHudPress(home, () => this.closeBulkPurchaseLayer());
+
+        const titlePill = new Node('TitlePill');
+        titlePill.layer = UI_2D;
+        titlePill.setPosition(0, hudY, 0);
+        titlePill.addComponent(UITransform).setContentSize(LEVEL_PILL_W, LEVEL_PILL_H);
+        const titleG = titlePill.addComponent(Graphics);
+        const titleR = LEVEL_PILL_H / 2;
+        titleG.fillColor = MILK;
+        titleG.roundRect(-LEVEL_PILL_W / 2, -titleR, LEVEL_PILL_W, LEVEL_PILL_H, titleR);
+        titleG.fill();
+        titleG.lineWidth = 2;
+        titleG.strokeColor = new Color(107, 74, 58, 64);
+        titleG.roundRect(-LEVEL_PILL_W / 2, -titleR, LEVEL_PILL_W, LEVEL_PILL_H, titleR);
+        titleG.stroke();
+        topHeader.addChild(titlePill);
+        const protoIndex = bulkPrototypeIndex(proto.run.id);
+        const titleLabel = this.addLabel(
+            titlePill,
+            'Label',
+            `第 ${protoIndex + 1} 关`,
+            LEVEL_LABEL_FONT,
+            WALNUT,
+            LEVEL_PILL_W - 20,
+            LEVEL_LABEL_LINE,
+        );
+        this.tuneLabel(titleLabel, true);
+        const titleLb = titleLabel.getComponent(Label);
+        if (titleLb) titleLb.lineHeight = LEVEL_LABEL_LINE;
+
+        const undo = this.addHudRoundBtn(topHeader, 'BtnUndo', 312, hudY);
+        this.addSprite(undo, 'Icon', this.iconUndo, 48, 48, 0, 0, WALNUT);
+        this.bindHudPress(undo, () => this.openBulkPurchaseLayer(proto.run.id, 0));
+
+        const board = new Node('FridgeZone');
+        board.layer = UI_2D;
+        board.setPosition(0, BULK_CLUSTER_Y, 0);
+        board.addComponent(UITransform).setContentSize(560, 360);
+        card.addChild(board);
+
+        const receiptZone = new Node('ReceiptZone');
+        receiptZone.layer = UI_2D;
+        const trayTop = BULK_CLUSTER_Y + BULK_TRAY_DY + BULK_TRAY_H / 2;
+        receiptZone.setPosition(BULK_RECEIPT_X, trayTop - BULK_RECEIPT_H / 2, 0);
+        receiptZone.addComponent(UITransform).setContentSize(BULK_RECEIPT_W, BULK_RECEIPT_H);
+        card.addChild(receiptZone);
+
+        const bagZone = new Node('BagZone');
+        bagZone.layer = UI_2D;
+        bagZone.setPosition(0, BULK_BAG_ZONE_Y, 0);
+        bagZone.addComponent(UITransform).setContentSize(DESIGN_W, BULK_BAG_ZONE_H);
+        card.addChild(bagZone);
+
+        const counterZone = new Node('CounterZone');
+        counterZone.layer = UI_2D;
+        counterZone.setPosition(0, Y_BUFFER, 0);
+        counterZone.addComponent(UITransform).setContentSize(BUF_BOARD_W, BUF_BOARD_H);
+        card.addChild(counterZone);
+
+        const footerZone = new Node('FooterZone');
+        footerZone.layer = UI_2D;
+        footerZone.setPosition(0, BULK_FOOTER_Y, 0);
+        footerZone.addComponent(UITransform).setContentSize(300, 52);
+        card.addChild(footerZone);
+
+        let trayTargetIndex: number | null = demo.activeTrays.findIndex((tray) => !!tray && !tray.sealed && tray.filled < tray.cap);
+        if (trayTargetIndex < 0) trayTargetIndex = null;
+
+        const boxTitleChip = new Node('BoxTitleChip');
+        boxTitleChip.layer = UI_2D;
+        boxTitleChip.setPosition(0, 218, 0);
+        boxTitleChip.addComponent(UITransform).setContentSize(244, 34);
+        this.ensureBulkPillSkin(boxTitleChip, 'Bg', 244, 34, 17, Color.WHITE, new Color(255, 252, 247, 255), new Color(176, 130, 96, 120), 2);
+        board.addChild(boxTitleChip);
+        const boxTitle = this.addLabel(boxTitleChip, 'Label', '开放格 + 预告 + 小票', 20, WALNUT, 220, 24);
+        boxTitle.setPosition(0, 0, 0);
+        const boxBody = this.addLabel(board, 'BoxBody', '', 16, WALNUT, 600, 42);
+        boxBody.setPosition(0, 214, 0);
+        const boxBodyLabel = boxBody.getComponent(Label);
+        if (boxBodyLabel) {
+            boxBodyLabel.enableWrapText = true;
+            boxBodyLabel.lineHeight = 22;
+        }
+        boxTitleChip.active = false;
+        boxBody.active = false;
+        let bagTarget: 'tray' | 'counter' = 'tray';
+        let settleAfterMove = () => {};
+        let handleBagTap = (_col: number) => {};
+        const syncFooter = () => {
+            const footer = footerZone.getChildByName('BulkFooter');
+            if (footer) this.syncBulkP8Footer(footer, demo, stage + 1 < proto.run.stages.length);
+        };
+        let counterPanel: Node | null = null;
+        let receipt: Node | null = null;
+        const syncTrayDemo = () => {
+            this.renderBulkP3QueueDemo(board, demo, bagTarget === 'tray' ? trayTargetIndex : null, (next) => {
+                trayTargetIndex = next;
+                bagTarget = 'tray';
+                syncTrayDemo();
+                if (counterPanel) this.syncBulkP4CounterDemo(counterPanel, demo, trayTargetIndex, bagTarget);
+                syncBagDemo();
+            });
+            const pulseIdx = this.bulkPulseTrayIndex;
+            this.bulkPulseTrayIndex = null;
+            if (pulseIdx != null) this.pulseBulkTrayFood(board, pulseIdx);
+        };
+        const bagHost = new Node('BagHost');
+        bagHost.layer = UI_2D;
+        bagHost.setPosition(0, 0, 0);
+        bagHost.addComponent(UITransform).setContentSize(DESIGN_W, BULK_BAG_ZONE_H);
+        bagZone.addChild(bagHost);
+        const syncBagDemo = () => {
+            this.renderBulkP75BagDemo(bagHost, demo, trayTargetIndex, bagTarget);
+            syncFooter();
+        };
+        syncTrayDemo();
+        receipt = this.buildBulkP5ReceiptDemo(receiptZone);
+        this.syncBulkP5ReceiptDemo(receipt, demo);
+
+        const chip = this.addLabel(board, 'StepChip', '', 20, MILK, 140, 30);
+        chip.setPosition(0, -230, 0);
+        const chipBg = new Node('StepChipBg');
+        chipBg.layer = UI_2D;
+        chipBg.setPosition(0, -230, -1);
+        chipBg.addComponent(UITransform).setContentSize(128, 36);
+        this.ensureBulkPillSkin(chipBg, 'Bg', 128, 36, 18, SAGE, SAGE, null, 0);
+        board.addChild(chipBg);
+        chipBg.active = false;
+        chip.active = false;
+        chip.setSiblingIndex(board.children.length - 1);
+
+        counterPanel = new Node('CounterPanel');
+        counterPanel.layer = UI_2D;
+        counterPanel.setPosition(0, 0, 0);
+        counterPanel.addComponent(UITransform).setContentSize(BUF_BOARD_W, BUF_BOARD_H);
+        counterZone.addChild(counterPanel);
+        this.buildBulkP4CounterDemo(counterPanel, board, receipt, demo, () => trayTargetIndex, () => bagTarget, () => {
+            bagTarget = 'counter';
+            syncTrayDemo();
+            this.syncBulkP4CounterDemo(counterPanel, demo, trayTargetIndex, bagTarget);
+            syncBagDemo();
+        }, () => {
+            syncTrayDemo();
+            this.syncBulkP4CounterDemo(counterPanel, demo, trayTargetIndex, bagTarget);
+            syncBagDemo();
+            settleAfterMove();
+        }, () => {
+            trayTargetIndex = null;
+        });
+        settleAfterMove = () => {
+            this.settleBulkMove(layer, demo, proto.run.id, protoIndex, () => {
+                trayTargetIndex = demo.activeTrays.findIndex((tray) => !!tray && !tray.sealed && tray.filled < tray.cap);
+                if (trayTargetIndex < 0) trayTargetIndex = null;
+                bagTarget = 'tray';
+                syncTrayDemo();
+                if (counterPanel) this.syncBulkP4CounterDemo(counterPanel, demo, trayTargetIndex, bagTarget);
+                if (receipt) this.syncBulkP5ReceiptDemo(receipt, demo);
+                syncBagDemo();
+            });
+        };
+        handleBagTap = (col: number) => {
+            if (this.busy || this.bulkSettleLock) return;
+            const item = demo.peekBag(col);
+            if (!item) return;
+            const from = this.findBulkBagTop(bagHost, col);
+            const commitBagPlace = () => {
+                const placedTray = bagTarget === 'tray' ? trayTargetIndex : null;
+                const slot = placedTray != null ? demo.activeTrays[placedTray] : null;
+                let ok = false;
+                if (bagTarget === 'tray') {
+                    if (trayTargetIndex == null) return;
+                    ok = demo.debugPlaceBagTopToTray(col, trayTargetIndex);
+                } else {
+                    ok = demo.debugPlaceBagTopToAnyCounter(col);
+                }
+                if (!ok) return;
+                if (placedTray != null) {
+                    const activeNow = demo.activeTrays[placedTray];
+                    if (!activeNow || activeNow.sealed || activeNow.filled >= activeNow.cap) trayTargetIndex = null;
+                    if (activeNow && activeNow.kind) this.bulkPulseTrayIndex = placedTray;
+                    if (slot) this.playBulkFridgeArrive(slot.sealed);
+                }
+                syncTrayDemo();
+                if (counterPanel) this.syncBulkP4CounterDemo(counterPanel, demo, trayTargetIndex, bagTarget);
+                if (receipt) this.syncBulkP5ReceiptDemo(receipt, demo);
+                if (counterPanel) this.syncBulkP6FailDemo(counterPanel, demo);
+                syncBagDemo();
+                settleAfterMove();
+            };
+            if (bagTarget === 'tray') {
+                if (trayTargetIndex == null) {
+                    this.showHomeToast('请先点一个可收的冰箱格');
+                    return;
+                }
+                if (!demo.debugCanPlaceBagTopToTray(col, trayTargetIndex)) {
+                    this.showHomeToast(demo.debugRejectsNewTray(item, trayTargetIndex)
+                        ? this.bulkAntiSplitToast(item)
+                        : '这件现在进不了当前目标格');
+                    return;
+                }
+                const to = this.bulkFridgeLandNode(board, trayTargetIndex);
+                if (from && to) this.flyBulkItem(card, from, to, item, { w: 48, h: 48 }, commitBagPlace, false);
+                else commitBagPlace();
+                return;
+            }
+            const counterIndex = demo.debugFindBagTopCounterIndex(col);
+            if (counterIndex < 0 || !demo.debugCanPlaceBagTopToAnyCounter(col)) {
+                this.showHomeToast('这件现在进不了柜台同种叠或空位');
+                return;
+            }
+            const to = counterPanel?.getChildByName(`Counter${counterIndex}`);
+            if (from && to) this.flyBulkItem(card, from, to, item, { w: BUF_FOOD, h: BUF_FOOD }, commitBagPlace, false);
+            else commitBagPlace();
+        };
+        this.bulkDragCtx = {
+            card,
+            demo,
+            bagHost,
+            fridgeZone: board,
+            getCounterPanel: () => counterPanel,
+            onBagTap: (col) => handleBagTap(col),
+            pourQuiet: (counterIndex, trayIndex) => this.pourBulkP4Counter(
+                board,
+                counterPanel as Node,
+                receipt as Node,
+                demo,
+                counterIndex,
+                trayIndex,
+                true,
+                () => {
+                    syncTrayDemo();
+                    this.syncBulkP4CounterDemo(counterPanel as Node, demo, trayTargetIndex, bagTarget);
+                    syncBagDemo();
+                    settleAfterMove();
+                },
+                () => {
+                    trayTargetIndex = null;
+                },
+            ),
+            setTrayTarget: (index) => {
+                trayTargetIndex = index;
+            },
+            setBagTarget: (target) => {
+                bagTarget = target;
+            },
+            afterPlace: (placedTray) => {
+                if (placedTray != null) {
+                    const activeNow = demo.activeTrays[placedTray];
+                    if (!activeNow || activeNow.sealed || activeNow.filled >= activeNow.cap) trayTargetIndex = null;
+                    if (activeNow && activeNow.kind) this.bulkPulseTrayIndex = placedTray;
+                }
+                syncTrayDemo();
+                if (counterPanel) this.syncBulkP4CounterDemo(counterPanel, demo, trayTargetIndex, bagTarget);
+                if (receipt) this.syncBulkP5ReceiptDemo(receipt, demo);
+                if (counterPanel) this.syncBulkP6FailDemo(counterPanel, demo);
+                syncBagDemo();
+                settleAfterMove();
+            },
+        };
+        syncBagDemo();
+        if (BULK_GUIDE_ENABLED && sys.localStorage.getItem(BULK_GUIDE_SEEN_KEY) !== '1') this.openBulkGuideLayer(layer);
+    }
+
+    private settleBulkMove(
+        layer: Node,
+        demo: BulkPurchaseState,
+        runId: string,
+        protoIndex: number,
+        resync: () => void,
+    ): void {
+        if (this.bulkSettleLock || !layer.isValid) return;
+        if (demo.isStageResolved()) {
+            try {
+                if (demo.advanceStage()) {
+                    demo.takeStageCheckpoint();
+                    demo.takeBranchCheckpoint();
+                    resync();
+                    this.showHomeToast('这一袋收好了');
+                    return;
+                }
+            } catch (error) {
+                const message = error instanceof Error ? error.message : String(error);
+                console.error(`[bulk] next stage ${runId} failed: ${message}`);
+                this.showHomeToast('下一趟还铺不出来');
+                return;
+            }
+            this.bulkSettleLock = true;
+            const nextRunId = nextBulkRunId(runId);
+            this.scheduleOnce(() => {
+                if (!layer.isValid) return;
+                this.spawnBulkWinCard(layer, demo.steps, protoIndex, nextRunId);
+            }, SETTLE_DELAY);
+            return;
+        }
+        const reason = demo.detectFail();
+        if (!reason) {
+            demo.takeBranchCheckpoint();
+            return;
+        }
+        this.bulkSettleLock = true;
+        this.scheduleOnce(() => {
+            if (!layer.isValid) return;
+            playSfx('game_failed');
+            this.flashBulkFail(layer, reason, () => {
+                this.spawnBulkFailCard(layer, reason, demo, runId, resync);
+            });
+        }, SETTLE_DELAY);
+    }
+
+    private flashBulkFail(layer: Node, reason: FailReason, done: () => void): void {
+        const card = layer.getChildByName('Card');
+        const targets: Node[] = [];
+        if (reason === 'buffer_full') {
+            const panel = card?.getChildByName('CounterZone')?.getChildByName('CounterPanel');
+            for (let i = 0; i < 3; i++) {
+                const slot = panel?.getChildByName(`Counter${i}`);
+                if (slot) targets.push(slot);
+            }
+        } else {
+            const shell = card?.getChildByName('FridgeZone')?.getChildByName('TrayDemo');
+            if (shell) {
+                for (let i = 0; i < 4; i++) {
+                    const tray = shell.getChildByName(`BulkTray${i}`);
+                    if (tray) targets.push(tray);
+                }
+            }
+        }
+        for (let i = 0; i < targets.length; i++) this.pulseCoral(targets[i]);
+        this.scheduleOnce(done, 0.42);
+    }
+
+    private spawnBulkFailCard(
+        layer: Node,
+        reason: FailReason,
+        demo: BulkPurchaseState,
+        runId: string,
+        resync: () => void,
+    ): void {
+        const old = layer.getChildByName('FailCard');
+        if (old) old.destroy();
+        const locked = reason === 'locked_out';
+        const desc = locked ? '退回到还能收的一步' : '退回本关还能继续的位置';
+        const cta = locked ? '退回可收的一步' : '退回保底点';
+
+        const swallow = new Node('FailCard');
+        swallow.layer = UI_2D;
+        swallow.setPosition(0, 0, 0);
+        swallow.addComponent(UITransform).setContentSize(DESIGN_W, DESIGN_H);
+        const hit = swallow.addComponent(Graphics);
+        hit.fillColor = new Color(255, 255, 255, 1);
+        hit.rect(-DESIGN_W / 2, -DESIGN_H / 2, DESIGN_W, DESIGN_H);
+        hit.fill();
+        swallow.on(Node.EventType.TOUCH_START, () => {}, this);
+        layer.addChild(swallow);
+
+        const card = new Node('Card');
+        card.layer = UI_2D;
+        card.setPosition(0, -40, 0);
+        card.setScale(0.86, 0.86, 1);
+        card.addComponent(UITransform).setContentSize(600, 460);
+        const cg = card.addComponent(Graphics);
+        cg.fillColor = CREAM;
+        cg.roundRect(-300, -230, 600, 460, 36);
+        cg.fill();
+        cg.lineWidth = 3;
+        cg.strokeColor = new Color(107, 74, 58, 50);
+        cg.roundRect(-300, -230, 600, 460, 36);
+        cg.stroke();
+        const cardOp = card.addComponent(UIOpacity);
+        cardOp.opacity = 0;
+        swallow.addChild(card);
+
+        if (locked) this.addBulkLockedFailTitle(card, demo);
+        else {
+            const titleNode = this.addLabel(card, 'FailTitle', '柜台堆满了', 40, WALNUT, 520, 52);
+            titleNode.setPosition(0, 168, 0);
+            this.tuneLabel(titleNode, true);
+        }
+        const body = this.addLabel(card, 'FailDesc', desc, 26, FRAME, 520, 72);
+        body.setPosition(0, 108, 0);
+        this.tuneLabel(body);
+        const bodyLb = body.getComponent(Label);
+        if (bodyLb) {
+            bodyLb.enableWrapText = true;
+            bodyLb.overflow = Label.Overflow.CLAMP;
+        }
+
+        const main = new Node('FailCta');
+        main.layer = UI_2D;
+        main.setPosition(0, 18, 0);
+        main.addComponent(UITransform).setContentSize(480, 88);
+        const mg = main.addComponent(Graphics);
+        mg.fillColor = CORAL;
+        mg.roundRect(-240, -44, 480, 88, 44);
+        mg.fill();
+        const ctaLabel = this.addLabel(main, 'Txt', cta, 32, MILK, 440, 48);
+        this.tuneLabel(ctaLabel, true);
+        card.addChild(main);
+        this.bindHudPress(main, () => {
+            if (locked) demo.debugResolveLockedOut();
+            else demo.debugResolveBufferFull();
+            this.bulkSettleLock = false;
+            if (swallow.isValid) swallow.destroy();
+            resync();
+        });
+
+        const share = new Node('FailShare');
+        share.layer = UI_2D;
+        share.setPosition(0, -86, 0);
+        share.addComponent(UITransform).setContentSize(480, 80);
+        const sg = share.addComponent(Graphics);
+        sg.fillColor = MILK;
+        sg.roundRect(-240, -40, 480, 80, 40);
+        sg.fill();
+        sg.lineWidth = 2;
+        sg.strokeColor = new Color(107, 74, 58, 51);
+        sg.roundRect(-240, -40, 480, 80, 40);
+        sg.stroke();
+        const shareLabel = this.addLabel(share, 'Txt', '让好友也收这一层', 28, WALNUT, 440, 44);
+        this.tuneLabel(shareLabel);
+        card.addChild(share);
+        const protoIndex = bulkPrototypeIndex(runId);
+        this.bindHudPress(share, () => {
+            this.showHomeToast(`第 ${protoIndex + 1} 关这层我收不进去了`);
+        });
+
+        const retry = this.addLabel(card, 'FailRetry', '重开本关', 26, new Color(107, 74, 58, 153), 280, 40);
+        retry.setPosition(0, -168, 0);
+        this.tuneLabel(retry);
+        this.bindHudPress(retry, () => this.openBulkPurchaseLayer(runId, 0));
+
+        tween(cardOp).to(0.2, { opacity: 255 }).start();
+        tween(card)
+            .to(0.32, { position: new Vec3(0, 0, 0), scale: new Vec3(1.04, 1.04, 1) }, { easing: easing.backOut })
+            .to(0.1, { scale: new Vec3(1, 1, 1) })
+            .start();
+    }
+
+    private addBulkLockedFailTitle(card: Node, demo: BulkPurchaseState): void {
+        const kind = demo.debugLockedOutKind();
+        const frame = kind ? (this.frameForBag(kind) || this.frameForFood(kind)) : null;
+        if (!kind || !frame) {
+            const titleNode = this.addLabel(card, 'FailTitle', '这格锁错了', 40, WALNUT, 520, 52);
+            titleNode.setPosition(0, 168, 0);
+            this.tuneLabel(titleNode, true);
+            return;
+        }
+        const fitted = this.fitAspect(this.foodKindAspect(kind), 48, 48);
+        const iconW = Math.max(28, Math.round(fitted.w));
+        const iconH = Math.max(28, Math.round(fitted.h));
+        const gap = 8;
+        const textW = 132;
+        const rowW = iconW + gap + textW;
+        const row = new Node('FailTitle');
+        row.layer = UI_2D;
+        row.setPosition(0, 168, 0);
+        row.addComponent(UITransform).setContentSize(rowW, 52);
+        card.addChild(row);
+        this.addSprite(row, 'Icon', frame, iconW, iconH, -rowW / 2 + iconW / 2, 0, Color.WHITE);
+        const text = this.addLabel(row, 'Txt', '锁错了', 40, WALNUT, textW, 52);
+        text.setPosition(-rowW / 2 + iconW + gap + textW / 2, 0, 0);
+        this.tuneLabel(text, true);
+        const lb = text.getComponent(Label);
+        if (lb) {
+            lb.horizontalAlign = Label.HorizontalAlign.LEFT;
+            lb.overflow = Label.Overflow.NONE;
+        }
+    }
+
+    private spawnBulkWinCard(layer: Node, steps: number, protoIndex: number, nextRunId?: string): void {
+        const old = layer.getChildByName('WinPack');
+        if (old) old.destroy();
+        playSfx('win_tg');
+        const size = this.canvasSize();
+        const wrap = new Node('WinPack');
+        wrap.layer = UI_2D;
+        wrap.setPosition(0, 0, 0);
+        wrap.addComponent(UITransform).setContentSize(size.w, size.h);
+        wrap.on(Node.EventType.TOUCH_START, () => {}, this);
+        layer.addChild(wrap);
+
+        const dim = this.addSprite(wrap, 'WinDim', this.builtin, size.w, size.h, 0, 0, new Color(48, 48, 48, 255));
+        const dimOp = dim.addComponent(UIOpacity);
+        dimOp.opacity = 0;
+        tween(dimOp).to(0.4, { opacity: 178 }, { easing: easing.quadOut }).start();
+
+        if (this.winPerfect) {
+            const stamp = this.addWinPerfectStamp(wrap, 0, 470, 560);
+            stamp.setScale(stamp.scale.x * 0.7, stamp.scale.y * 0.7, 1);
+            const stampOp = stamp.addComponent(UIOpacity);
+            stampOp.opacity = 0;
+            const s = stamp.scale.x / 0.7;
+            tween(stampOp).to(0.24, { opacity: 255 }).start();
+            tween(stamp)
+                .to(0.36, { scale: new Vec3(s * 1.04, s * 1.04, 1) }, { easing: easing.backOut })
+                .to(0.1, { scale: new Vec3(s, s, 1) })
+                .start();
+        } else {
+            const fallback = this.addLabel(wrap, 'WinStamp', '完美收纳！', 48, new Color(248, 240, 220, 255), 520, 58);
+            fallback.setPosition(0, 470, 0);
+            this.tuneLabel(fallback, true);
+        }
+
+        const cardW = 560;
+        const cardH = 640;
+        const card = new Node('WinCard');
+        card.layer = UI_2D;
+        card.setPosition(0, -48, 0);
+        card.setScale(0.82, 0.82, 1);
+        card.addComponent(UITransform).setContentSize(cardW, cardH);
+        const cg = card.addComponent(Graphics);
+        cg.fillColor = new Color(61, 50, 41, 36);
+        cg.roundRect(-cardW / 2 + 8, -cardH / 2 - 12, cardW, cardH, 40);
+        cg.fill();
+        cg.fillColor = new Color(255, 249, 239, 255);
+        cg.roundRect(-cardW / 2, -cardH / 2, cardW, cardH, 40);
+        cg.fill();
+        const cardOp = card.addComponent(UIOpacity);
+        cardOp.opacity = 0;
+        wrap.addChild(card);
+
+        const trophy = this.makeTrophyFridge();
+        trophy.setPosition(0, 196, 0);
+        trophy.setScale(0.12, 0.12, 1);
+        card.addChild(trophy);
+
+        const status = this.addLabel(card, 'WinStatus', '这一关收好了', 30, WALNUT, 480, 40);
+        status.setPosition(0, 64, 0);
+        status.setScale(0, 0, 1);
+        this.tuneLabel(status, true);
+
+        const stepsNode = new Node('WinSteps');
+        stepsNode.layer = UI_2D;
+        stepsNode.setPosition(0, -28, 0);
+        stepsNode.setScale(0, 0, 1);
+        stepsNode.addComponent(UITransform).setContentSize(500, 120);
+        card.addChild(stepsNode);
+        const stepSize = 108;
+        const unitSize = Math.round(stepSize * 0.5);
+        const digits = String(steps).length;
+        const numW = Math.max(unitSize, digits * Math.round(stepSize * 0.62));
+        const unitW = unitSize + 8;
+        const gap = 6;
+        const totalW = numW + gap + unitW;
+        const stepNum = this.addLabel(stepsNode, 'Num', `${steps}`, stepSize, CORAL, numW + 20, 120);
+        const stepUnit = this.addLabel(stepsNode, 'Unit', '步', unitSize, CORAL, unitW, 64);
+        stepNum.setPosition(-totalW / 2 + numW / 2, 0, 0);
+        stepUnit.setPosition(totalW / 2 - unitW / 2, -Math.round(stepSize * 0.16), 0);
+
+        const nextLabel = nextRunId ? '下一关  >' : '回主页';
+        const nextBtn = this.makeWinPrimaryBtn(card, 'BtnNext', nextLabel, 0, -168);
+        nextBtn.setScale(0, 0, 1);
+        const shareBtn = this.makeWinSecondaryBtn(card, 'BtnShareSteps', '分享步数', 0, -268);
+        shareBtn.setScale(0, 0, 1);
+
+        tween(cardOp).to(0.22, { opacity: 255 }).start();
+        tween(card)
+            .to(0.4, { position: new Vec3(0, -28, 0), scale: new Vec3(1.03, 1.03, 1) }, { easing: easing.backOut })
+            .to(0.12, { scale: new Vec3(1, 1, 1) })
+            .start();
+        this.scheduleOnce(() => {
+            tween(trophy)
+                .to(0.32, { scale: new Vec3(0.78, 0.78, 1) }, { easing: easing.backOut })
+                .to(0.1, { scale: new Vec3(0.7, 0.7, 1) })
+                .start();
+        }, 0.16);
+        this.scheduleOnce(() => {
+            tween(status).to(0.22, { scale: new Vec3(1, 1, 1) }, { easing: easing.backOut }).start();
+        }, 0.34);
+        this.scheduleOnce(() => {
+            tween(stepsNode)
+                .to(0.3, { scale: new Vec3(1.12, 1.12, 1) }, { easing: easing.backOut })
+                .to(0.1, { scale: new Vec3(1, 1, 1) })
+                .start();
+        }, 0.48);
+        this.scheduleOnce(() => {
+            tween(nextBtn)
+                .to(0.28, { scale: new Vec3(1.06, 1.06, 1) }, { easing: easing.backOut })
+                .to(0.1, { scale: new Vec3(1, 1, 1) })
+                .start();
+        }, 0.66);
+        this.scheduleOnce(() => {
+            tween(shareBtn)
+                .to(0.26, { scale: new Vec3(1.04, 1.04, 1) }, { easing: easing.backOut })
+                .to(0.1, { scale: new Vec3(1, 1, 1) })
+                .start();
+        }, 0.78);
+
+        this.bindHudPress(nextBtn, () => {
+            if (nextRunId) this.openBulkPurchaseLayer(nextRunId, 0);
+            else this.closeBulkPurchaseLayer();
+        });
+        this.bindHudPress(shareBtn, () => {
+            this.showHomeToast(`第 ${protoIndex + 1} 关我收好了，用了 ${steps} 步`);
+        });
+    }
+
+    private renderBulkP3QueueDemo(
+        parent: Node,
+        demo: BulkPurchaseState,
+        selectedTrayIndex: number | null,
+        onSelectTray: (index: number) => void,
+    ): void {
+        const old = parent.getChildByName('TrayDemo');
+        if (old) old.destroy();
+        const shell = new Node('TrayDemo');
+        shell.layer = UI_2D;
+        parent.addChild(shell);
+        const positions = [
+            { x: BULK_TRAY_BLOCK_X - BULK_TRAY_DX, y: BULK_TRAY_DY },
+            { x: BULK_TRAY_BLOCK_X + BULK_TRAY_DX, y: BULK_TRAY_DY },
+            { x: BULK_TRAY_BLOCK_X - BULK_TRAY_DX, y: -BULK_TRAY_DY },
+            { x: BULK_TRAY_BLOCK_X + BULK_TRAY_DX, y: -BULK_TRAY_DY },
+        ];
+        for (let i = 0; i < 4; i++) {
+            const tray = demo.activeTrays[i];
+            if (!tray) continue;
+            const open = !tray.sealed && tray.filled < tray.cap;
+            const tone = !open
+                ? 'blocked'
+                : i === selectedTrayIndex
+                    ? 'selected'
+                    : 'idle';
+            const node = this.addBulkP3TrayCard(shell, tray.cap, tray.filled, tray.kind || null, positions[i].x, positions[i].y, tone, i);
+            if (open) {
+                if (!node.getComponent(Button)) node.addComponent(Button);
+                this.bindHudPress(node, () => onSelectTray(i));
+            }
+        }
+
+        const preview = demo.previewTrays();
+        const showCount = Math.min(preview.length, Math.max(0, demo.stageDef.queuePreview));
+        if (showCount > 0) {
+            const row = new Node('QueuePreview');
+            row.layer = UI_2D;
+            const captionW = 120;
+            const pillW = 76;
+            const pillH = 36;
+            const pillGap = 8;
+            const captionGap = 10;
+            const rowW = captionW + captionGap + showCount * pillW + (showCount - 1) * pillGap;
+            row.setPosition(BULK_TRAY_BLOCK_X, -BULK_TRAY_DY - BULK_TRAY_H / 2 - 16 - pillH / 2, 0);
+            row.addComponent(UITransform).setContentSize(rowW, pillH);
+            shell.addChild(row);
+            const caption = this.addLabel(row, 'Caption', '收满后补进', 20, WALNUT, captionW, 28);
+            caption.setPosition(-rowW / 2 + captionW / 2, 0, 0);
+            this.tuneLabel(caption, true);
+            for (let i = 0; i < showCount; i++) {
+                const cap = preview[i] ? preview[i].cap : 0;
+                const x = -rowW / 2 + captionW + captionGap + pillW / 2 + i * (pillW + pillGap);
+                const node = new Node(`Preview${i}`);
+                node.layer = UI_2D;
+                node.setPosition(x, 0, 0);
+                node.addComponent(UITransform).setContentSize(pillW, pillH);
+                this.ensureRoundedBg(
+                    node,
+                    'Bg',
+                    pillW,
+                    pillH,
+                    pillH / 2,
+                    new Color(255, 252, 247, 236),
+                    new Color(176, 130, 96, 90),
+                    2,
+                );
+                row.addChild(node);
+                const label = this.addLabel(node, 'Label', `${cap}格`, 22, WALNUT, pillW - 10, 26);
+                label.setPosition(0, 0, 0);
+                this.tuneLabel(label, true);
+                if (i > 0) {
+                    const fade = node.addComponent(UIOpacity);
+                    fade.opacity = 170;
+                }
+            }
+        }
+    }
+
+    private renderBulkP75BagDemo(
+        parent: Node,
+        demo: BulkPurchaseState,
+        trayTargetIndex: number | null,
+        target: 'tray' | 'counter',
+    ): void {
+        const old = parent.getChildByName('BagDemo');
+        if (old) old.destroy();
+        const layerCard = parent.parent?.parent || null;
+        if (layerCard) {
+            const staleBar = layerCard.getChildByName('ControlBar');
+            if (staleBar) staleBar.destroy();
+        }
+        const shell = new Node('BagDemo');
+        shell.layer = UI_2D;
+        parent.addChild(shell);
+        const columnCount = Math.max(1, demo.bags.length);
+        const tableTop = this.worktopTop
+            ? this.addSprite(shell, 'TableTop', this.worktopTop, DESIGN_W, BULK_BAG_ZONE_H, 0, 0, Color.WHITE)
+            : null;
+        if (tableTop) tableTop.setSiblingIndex(0);
+        const titleChip = new Node('TitleChip');
+        titleChip.layer = UI_2D;
+        titleChip.setPosition(-250, 76, 0);
+        titleChip.addComponent(UITransform).setContentSize(188, 30);
+        this.ensureBulkPillSkin(titleChip, 'Bg', 188, 30, 15, Color.WHITE, new Color(255, 252, 247, 255), new Color(176, 130, 96, 108), 2);
+        shell.addChild(titleChip);
+        const title = this.addLabel(titleChip, 'Label', `购物袋顶层 · ${columnCount} 列`, 16, WALNUT, 164, 20);
+        title.setPosition(0, 0, 0);
+        titleChip.active = false;
+
+        const rowCount = columnCount >= BAG_TWO_ROW_MIN ? 2 : 1;
+        const topCount = rowCount === 2 ? Math.ceil(columnCount / 2) : columnCount;
+        const bottomCount = rowCount === 2 ? Math.max(0, columnCount - topCount) : 0;
+        const layoutCols = rowCount === 2 ? Math.max(topCount, bottomCount, 1) : columnCount;
+        const layout = this.bagLayout(layoutCols);
+        const frontSeat = (rowCount === 2 ? BAG_FRONT_SEAT_Y : -360) - BULK_BAG_ZONE_Y;
+        const backSeat = frontSeat + BAG_ROW_GAP + 30;
+        for (let i = 0; i < columnCount; i++) {
+            const item = demo.peekBag(i);
+            const depth = demo.bagDepth(i);
+            if (!item || depth <= 0) continue;
+            const card = new Node(`BagCol${i}`);
+            card.layer = UI_2D;
+            const topRow = rowCount === 1 || i < topCount;
+            const indexInRow = rowCount === 1 || topRow ? i : i - topCount;
+            const rowCols = rowCount === 1 ? columnCount : topRow ? topCount : bottomCount;
+            const scale = rowCount === 2 && topRow ? BAG_BACK_SCALE : 1;
+            const shown = this.shownStack(depth);
+            const stackH = Math.max(layout.trayH, this.columnHeight(layout, depth));
+            const seat = rowCount === 1 ? frontSeat : topRow ? backSeat : frontSeat;
+            const x = (indexInRow - (rowCols - 1) / 2) * (layout.w + layout.gap);
+            card.setPosition(x, seat + (stackH * scale) / 2, 0);
+            card.addComponent(UITransform).setContentSize(layout.w, stackH);
+            card.setScale(scale, scale, 1);
+            const canPlace = target === 'tray'
+                ? trayTargetIndex != null && demo.debugCanPlaceBagTopToTray(i, trayTargetIndex)
+                : demo.debugCanPlaceBagTopToAnyCounter(i);
+            const strokeColor = canPlace ? SAGE : new Color(160, 130, 120, 180);
+            const layers = Math.max(1, shown);
+            for (let layer = 0; layer < layers; layer++) {
+                const isTop = layer === layers - 1;
+                const y = -stackH / 2 + layout.trayH / 2 + layer * layout.step;
+                const tile = this.addSprite(
+                    card,
+                    isTop ? 'TopTray' : `BackTray${layer}`,
+                    isTop
+                        ? (this.bagTrayTop || this.bagTrayLower || this.builtin)
+                        : (this.bagTrayLower || this.bagTrayTop || this.builtin),
+                    layout.w,
+                    layout.trayH,
+                    0,
+                    y,
+                    isTop && item ? this.trayTint(item) : new Color(244, 238, 230, 255),
+                );
+                if (isTop && item) {
+                    const foodSize = this.bagFoodSize(item, layout);
+                    const foodY = Math.round(layout.trayH * -0.04) + Math.round(foodSize.h * 0.22);
+                    const iconFrame = this.frameForBag(item) || this.frameForFood(item);
+                    if (iconFrame) {
+                        this.addSprite(tile, 'Icon', iconFrame, foodSize.w, foodSize.h, 0, foodY, Color.WHITE);
+                    }
+                }
+            }
+            const ring = new Node('PlaceRing');
+            ring.layer = UI_2D;
+            ring.setPosition(0, -stackH / 2 + layout.trayH / 2 + (layers - 1) * layout.step, 0);
+            ring.addComponent(UITransform).setContentSize(layout.w, layout.trayH);
+            card.addChild(ring);
+            this.ensureRoundedBg(ring, 'Bg', layout.w, layout.trayH, 18, new Color(0, 0, 0, 0), strokeColor, 2);
+            shell.addChild(card);
+            const lipY = -stackH / 2 + (layers - 1) * layout.step + 12;
+            const badge = new Node('Left');
+            badge.layer = UI_2D;
+            badge.setPosition(0, lipY, 0);
+            badge.addComponent(UITransform).setContentSize(62, 30);
+            this.ensureRoundedBg(
+                badge,
+                'Bg',
+                62,
+                30,
+                12,
+                new Color(255, 252, 247, 230),
+                new Color(107, 74, 58, 48),
+                1,
+            );
+            card.addChild(badge);
+            const left = this.addLabel(badge, 'Label', `x${depth}`, 25, Color.BLACK, 56, 28);
+            left.setPosition(0, 0, 0);
+            this.tuneLabel(left, true);
+            card.on(Node.EventType.TOUCH_START, (e: EventTouch) => {
+                const top = demo.peekBag(i);
+                if (top) this.beginBulkPointer(e, { kind: 'bag', col: i }, top);
+            }, this);
+            card.on(Node.EventType.TOUCH_MOVE, (e: EventTouch) => this.moveBulkPointer(e), this);
+            card.on(Node.EventType.TOUCH_END, (e: EventTouch) => this.endBulkPointer(e), this);
+            card.on(Node.EventType.TOUCH_CANCEL, (e: EventTouch) => this.endBulkPointer(e), this);
+        }
+        const tableFront = this.worktopFront
+            ? this.addSprite(shell, 'TableFront', this.worktopFront, DESIGN_W, 120, 0, Y_BUFFER + 76 - BULK_BAG_ZONE_Y, Color.WHITE)
+            : null;
+        if (tableFront) tableFront.setSiblingIndex(shell.children.length - 1);
+    }
+
+    private buildBulkP5ReceiptDemo(parent: Node): Node {
+        const receipt = new Node('ReceiptPanel');
+        receipt.layer = UI_2D;
+        receipt.setPosition(0, 0, 0);
+        receipt.addComponent(UITransform).setContentSize(BULK_RECEIPT_W, BULK_RECEIPT_H);
+        this.ensureRoundedBg(receipt, 'Bg', BULK_RECEIPT_W, BULK_RECEIPT_H, 20, new Color(250, 252, 255, 255), new Color(122, 158, 176, 90));
+        parent.addChild(receipt);
+        const title = this.addLabel(receipt, 'Title', '购物小票', 22, WALNUT, BULK_RECEIPT_W - 16, 30);
+        title.setPosition(0, BULK_RECEIPT_H / 2 - 28, 0);
+        this.tuneLabel(title, true);
+        const rule = new Node('Rule');
+        rule.layer = UI_2D;
+        rule.setPosition(0, BULK_RECEIPT_H / 2 - 48, 0);
+        rule.addComponent(UITransform).setContentSize(100, 2);
+        const ruleG = rule.addComponent(Graphics);
+        ruleG.fillColor = new Color(176, 130, 96, 70);
+        ruleG.roundRect(-50, -1, 100, 2, 1);
+        ruleG.fill();
+        receipt.addChild(rule);
+        return receipt;
+    }
+
+    private syncBulkP5ReceiptDemo(receipt: Node, demo: BulkPurchaseState): void {
+        for (let i = receipt.children.length - 1; i >= 0; i--) {
+            const child = receipt.children[i];
+            if (child.name.startsWith('Row')) child.destroy();
+        }
+        const kinds = FOOD_IDS.filter((id) => (demo.stageDef.receipt[id] || 0) > 0);
+        for (let i = 0; i < kinds.length; i++) {
+            const id = kinds[i];
+            const row = new Node(`Row${i}`);
+            row.layer = UI_2D;
+            row.setPosition(0, BULK_RECEIPT_H / 2 - 78 - i * 44, 0);
+            row.addComponent(UITransform).setContentSize(BULK_RECEIPT_W - 20, 36);
+            receipt.addChild(row);
+            const iconFrame = this.frameForBag(id) || this.frameForFood(id);
+            if (iconFrame) {
+                const icon = this.addSprite(row, 'Icon', iconFrame, 32, 32, -30, 0, Color.WHITE);
+                icon.setScale(1, 1, 1);
+            }
+            const count = this.addLabel(row, 'Count', `x${demo.receiptRemaining[id] || 0}`, 24, WALNUT, 56, 28);
+            count.setPosition(26, 0, 0);
+            this.tuneLabel(count, true);
+        }
+    }
+
+    private buildBulkP4CounterDemo(
+        panel: Node,
+        board: Node,
+        receipt: Node,
+        demo: BulkPurchaseState,
+        getTrayTargetIndex: () => number | null,
+        getBagTarget: () => 'tray' | 'counter',
+        onSelectCounter: () => void,
+        extraSync: () => void,
+        clearTrayTarget: () => void,
+    ): void {
+        const slotW = BUF_SLOT_W;
+        const slotH = BUF_SLOT_H;
+        const titleChip = new Node('TitleChip');
+        titleChip.layer = UI_2D;
+        titleChip.setPosition(-278, 64, 0);
+        titleChip.addComponent(UITransform).setContentSize(92, 30);
+        this.ensureBulkPillSkin(titleChip, 'Bg', 92, 30, 15, Color.WHITE, new Color(255, 252, 247, 255), new Color(176, 130, 96, 108), 2);
+        panel.addChild(titleChip);
+        const title = this.addLabel(titleChip, 'Label', '柜台 3 格', 16, WALNUT, 72, 20);
+        title.setPosition(0, 0, 0);
+        const targetChip = new Node('Target');
+        targetChip.layer = UI_2D;
+        targetChip.setPosition(0, 86, 0);
+        targetChip.addComponent(UITransform).setContentSize(242, 30);
+        this.ensureBulkPillSkin(targetChip, 'Bg', 242, 30, 15, Color.WHITE, new Color(255, 252, 247, 255), new Color(176, 130, 96, 108), 2);
+        panel.addChild(targetChip);
+        const target = this.addLabel(targetChip, 'Label', '当前目标：请先选格', 16, FRAME, 222, 20);
+        target.setPosition(0, 0, 0);
+
+        const hintChip = new Node('Hint');
+        hintChip.layer = UI_2D;
+        hintChip.setPosition(196, 64, 0);
+        hintChip.addComponent(UITransform).setContentSize(184, 30);
+        this.ensureBulkPillSkin(hintChip, 'Bg', 184, 30, 15, Color.WHITE, new Color(255, 252, 247, 255), new Color(176, 130, 96, 108), 2);
+        panel.addChild(hintChip);
+        const hint = this.addLabel(hintChip, 'Label', '短按 +1  长按连倒', 16, FRAME, 164, 20);
+        hint.setPosition(0, 0, 0);
+        titleChip.active = false;
+        targetChip.active = false;
+        hintChip.active = false;
+        if (this.bufferBoard) {
+            const boardArt = this.addSprite(panel, 'BoardArt', this.bufferBoard, BUF_BOARD_W, BUF_BOARD_H, 0, 0, Color.WHITE);
+            boardArt.setSiblingIndex(0);
+            const boardSp = boardArt.getComponent(Sprite);
+            if (boardSp) boardSp.sizeMode = Sprite.SizeMode.CUSTOM;
+        }
+        const hit = new Node('CounterHit');
+        hit.layer = UI_2D;
+        hit.setPosition(0, 0, 0);
+        hit.addComponent(UITransform).setContentSize(BUF_BOARD_W, BUF_BOARD_H);
+        const hitG = hit.addComponent(Graphics);
+        hitG.fillColor = new Color(255, 253, 248, 4);
+        hitG.roundRect(-BUF_BOARD_W / 2, -BUF_BOARD_H / 2, BUF_BOARD_W, BUF_BOARD_H, 28);
+        hitG.fill();
+        panel.addChild(hit);
+        hit.on(Node.EventType.TOUCH_END, () => onSelectCounter(), this);
+        const xs = this.bufferBoard ? BUF_WELL_XS : [-210, 0, 210];
+        for (let i = 0; i < 3; i++) {
+            const slot = new Node(`Counter${i}`);
+            slot.layer = UI_2D;
+            slot.setPosition(xs[i], this.bufferBoard ? BUF_WELL_Y : 10, 0);
+            slot.addComponent(UITransform).setContentSize(slotW, slotH);
+            this.ensureRoundedBg(
+                slot,
+                'Bg',
+                slotW,
+                slotH,
+                26,
+                this.bufferBoard ? new Color(0, 0, 0, 0) : new Color(240, 235, 228, 255),
+                new Color(176, 130, 96, 72),
+            );
+            panel.addChild(slot);
+            this.bindBulkP4CounterPress(slot, i, board, panel, receipt, demo, getTrayTargetIndex, getBagTarget, onSelectCounter, extraSync, clearTrayTarget);
+        }
+        this.syncBulkP4CounterDemo(panel, demo, getTrayTargetIndex(), getBagTarget());
+    }
+
+    private buildBulkP6FailDemo(
+        panel: Node,
+        board: Node,
+        receipt: Node,
+        demo: BulkPurchaseState,
+        getTrayTargetIndex: () => number | null,
+        extraSync: () => void,
+        clearTrayTarget: () => void,
+    ): void {
+        void panel;
+        void board;
+        void receipt;
+        void demo;
+        void getTrayTargetIndex;
+        void extraSync;
+        void clearTrayTarget;
+    }
+
+    private bindBulkP4CounterPress(
+        slot: Node,
+        counterIndex: number,
+        board: Node,
+        panel: Node,
+        receipt: Node,
+        demo: BulkPurchaseState,
+        getTrayTargetIndex: () => number | null,
+        getBagTarget: () => 'tray' | 'counter',
+        onSelectCounter: () => void,
+        extraSync: () => void,
+        clearTrayTarget: () => void,
+    ): void {
+        let pressing = false;
+        let longActive = false;
+        const canPourNow = () => getBagTarget() === 'tray' && (demo.counterStacks[counterIndex]?.count || 0) > 0;
+        const repeatPour = () => {
+            if (!pressing) return;
+            if (!this.pourBulkP4Counter(board, panel, receipt, demo, counterIndex, getTrayTargetIndex(), true, extraSync, clearTrayTarget)) {
+                pressing = false;
+                longActive = false;
+                this.unschedule(repeatPour);
+            }
+        };
+        const armLong = () => {
+            if (!pressing || !canPourNow()) return;
+            longActive = true;
+            repeatPour();
+            if (pressing) this.schedule(repeatPour, 0.12);
+        };
+        slot.on(Node.EventType.TOUCH_START, (e: EventTouch) => {
+            pressing = true;
+            longActive = false;
+            tween(slot).to(0.08, { scale: new Vec3(0.97, 0.97, 1) }).start();
+            const stack = demo.counterStacks[counterIndex];
+            if (stack?.kind && stack.count > 0) {
+                this.beginBulkPointer(e, { kind: 'buffer', index: counterIndex }, stack.kind);
+            }
+            if (canPourNow()) this.scheduleOnce(armLong, 0.22);
+        }, this);
+        slot.on(Node.EventType.TOUCH_MOVE, (e: EventTouch) => {
+            if (longActive) return;
+            this.moveBulkPointer(e);
+            if (this.bulkPress?.armed) {
+                this.unschedule(armLong);
+                this.unschedule(repeatPour);
+                pressing = false;
+                tween(slot).to(0.08, { scale: new Vec3(1, 1, 1) }).start();
+            }
+        }, this);
+        const release = (shortTap: boolean) => {
+            const shouldTap = shortTap && pressing && !longActive;
+            const pour = canPourNow();
+            pressing = false;
+            this.unschedule(armLong);
+            this.unschedule(repeatPour);
+            tween(slot).to(0.08, { scale: new Vec3(1, 1, 1) }).start();
+            if (!shouldTap) return;
+            if (pour) this.pourBulkP4Counter(board, panel, receipt, demo, counterIndex, getTrayTargetIndex(), false, extraSync, clearTrayTarget);
+            else onSelectCounter();
+        };
+        slot.on(Node.EventType.TOUCH_END, (e: EventTouch) => {
+            if (this.bulkPress && this.bulkPress.id === e.getID() && this.bulkPress.armed) {
+                pressing = false;
+                this.unschedule(armLong);
+                this.unschedule(repeatPour);
+                tween(slot).to(0.08, { scale: new Vec3(1, 1, 1) }).start();
+                this.endBulkPointer(e);
+                return;
+            }
+            if (this.bulkPress && this.bulkPress.id === e.getID()) this.bulkPress = null;
+            release(true);
+        }, this);
+        slot.on(Node.EventType.TOUCH_CANCEL, (e: EventTouch) => {
+            if (this.bulkPress && this.bulkPress.id === e.getID() && this.bulkPress.armed) {
+                pressing = false;
+                this.unschedule(armLong);
+                this.unschedule(repeatPour);
+                tween(slot).to(0.08, { scale: new Vec3(1, 1, 1) }).start();
+                this.endBulkPointer(e);
+                return;
+            }
+            if (this.bulkPress && this.bulkPress.id === e.getID()) this.bulkPress = null;
+            release(false);
+        }, this);
+    }
+
+    private pourBulkP4Counter(
+        board: Node,
+        panel: Node,
+        receipt: Node,
+        demo: BulkPurchaseState,
+        counterIndex: number,
+        trayIndex: number | null,
+        quiet: boolean,
+        extraSync: () => void,
+        clearTrayTarget: () => void,
+    ): boolean {
+        if (!quiet && this.busy) return false;
+        if (trayIndex == null) {
+            if (!quiet) this.showHomeToast('请先点一个可收的冰箱格');
+            return false;
+        }
+        if (!demo.debugCounterCanPour(counterIndex, trayIndex)) {
+            if (!quiet) {
+                const kind = demo.counterStacks[counterIndex]?.kind;
+                this.showHomeToast(kind && demo.debugRejectsNewTray(kind, trayIndex)
+                    ? this.bulkAntiSplitToast(kind)
+                    : '这叠现在倒不进当前目标格');
+            }
+            return false;
+        }
+        const commit = (): boolean => {
+            const slot = demo.activeTrays[trayIndex];
+            const ok = demo.debugPourOneFromCounter(counterIndex, trayIndex);
+            if (!ok) return false;
+            const activeNow = demo.activeTrays[trayIndex];
+            if (!activeNow || activeNow.sealed || activeNow.filled >= activeNow.cap) clearTrayTarget();
+            if (activeNow && activeNow.kind) this.bulkPulseTrayIndex = trayIndex;
+            if (slot) this.playBulkFridgeArrive(slot.sealed);
+            extraSync();
+            this.syncBulkP5ReceiptDemo(receipt, demo);
+            this.syncBulkP6FailDemo(panel, demo);
+            return true;
+        };
+        if (quiet) return commit();
+        const item = demo.counterStacks[counterIndex]?.kind;
+        const icon = panel.getChildByName(`Counter${counterIndex}`)?.getChildByName('Icon');
+        const tray = this.bulkFridgeLandNode(board, trayIndex);
+        const host = board.parent;
+        if (!item || !icon || !tray || !host) return commit();
+        this.flyBulkItem(host, icon, tray, item, { w: 48, h: 48 }, () => { commit(); }, false);
+        return true;
+    }
+
+    private findBulkBagTop(bagHost: Node, col: number): Node | null {
+        const shell = bagHost.getChildByName('BagDemo');
+        const bag = shell?.getChildByName(`BagCol${col}`);
+        const top = bag?.getChildByName('TopTray');
+        return top?.getChildByName('Icon') || top || null;
+    }
+
+    private flyBulkItem(
+        host: Node,
+        from: Node,
+        to: Node,
+        item: FoodId,
+        endSize: { w: number; h: number },
+        onLand: () => void,
+        playDrop: boolean,
+    ): void {
+        const hostUi = host.getComponent(UITransform);
+        if (!hostUi) {
+            onLand();
+            return;
+        }
+        this.busy = true;
+        const fromUi = from.getComponent(UITransform);
+        const fromScale = from.worldScale;
+        const startW = Math.max(24, fromUi ? fromUi.contentSize.width * Math.abs(fromScale.x) : 72);
+        const startH = Math.max(24, fromUi ? fromUi.contentSize.height * Math.abs(fromScale.y) : 72);
+        const fromPos = hostUi.convertToNodeSpaceAR(from.worldPosition.clone());
+        const toPos = hostUi.convertToNodeSpaceAR(to.worldPosition.clone());
+        const frame = this.frameForBag(item) || this.frameForFood(item);
+        if (!frame) {
+            this.busy = false;
+            onLand();
+            return;
+        }
+        const flyer = this.addSprite(host, 'BulkFlyer', frame, startW, startH, fromPos.x, fromPos.y, Color.WHITE);
+        flyer.setSiblingIndex(host.children.length - 1);
+        const hide = from.getComponent(UIOpacity) || from.addComponent(UIOpacity);
+        hide.opacity = 0;
+        const land = new Vec3(endSize.w / startW, endSize.h / startH, 1);
+        tween(flyer)
+            .to(FLY_SEC, { position: toPos, scale: land }, { easing: easing.cubicOut })
+            .start();
+        this.scheduleOnce(() => {
+            if (flyer.isValid) flyer.destroy();
+            this.busy = false;
+            if (!host.isValid) return;
+            onLand();
+            if (playDrop) playFridgeDrop();
+        }, FLY_SEC);
+    }
+
+    private clearBulkPress() {
+        this.foodPressToken += 1;
+        const press = this.bulkPress;
+        this.bulkPress = null;
+        this.clearDropHalo();
+        if (!press) return;
+        if (press.ghost && press.ghost.isValid) press.ghost.destroy();
+        if (press.hidden && press.hidden.isValid) this.showDragSource(press.hidden);
+    }
+
+    private beginBulkPointer(e: EventTouch, source: FoodDragSource, item: FoodId) {
+        if (this.bulkPress) {
+            if (this.bulkPress.id === e.getID()) e.propagationStopped = true;
+            return;
+        }
+        const ctx = this.bulkDragCtx;
+        if (!ctx || this.busy || this.bulkSettleLock) return;
+        const food = this.bulkSourceFoodNode(source);
+        const cardUi = ctx.card.getComponent(UITransform);
+        const origin = food && cardUi
+            ? cardUi.convertToNodeSpaceAR(food.worldPosition.clone())
+            : new Vec3();
+        const p = e.getUILocation();
+        this.bulkPress = {
+            id: e.getID(),
+            source,
+            item,
+            startX: p.x,
+            startY: p.y,
+            origin,
+            armed: false,
+            ghost: null,
+            flyer: null,
+            hidden: null,
+            hover: null,
+            hit: null,
+            flyW: 72,
+            flyH: 96,
+        };
+        e.propagationStopped = true;
+    }
+
+    private moveBulkPointer(e: EventTouch) {
+        const press = this.bulkPress;
+        if (!press || press.id !== e.getID()) return;
+        e.propagationStopped = true;
+        const p = e.getUILocation();
+        const dx = p.x - press.startX;
+        const dy = p.y - press.startY;
+        if (!press.armed) {
+            if (dx * dx + dy * dy < DRAG_SLOP * DRAG_SLOP) return;
+            this.armBulkPress(press);
+        }
+        if (this.bulkPress !== press || !press.ghost) return;
+        const finger = this.fingerInBulkCard(e);
+        if (!finger) return;
+        press.ghost.setPosition(finger.x, finger.y, 0);
+        const hit = this.destAtBulkTouch(e);
+        press.hit = hit;
+        const hover = hit && this.bulkDragCanDrop(press, hit) ? hit : null;
+        press.hover = hover;
+        if (hover) this.showBulkDropHalo(hover);
+        else this.clearDropHalo();
+    }
+
+    private endBulkPointer(e: EventTouch) {
+        const press = this.bulkPress;
+        if (!press || press.id !== e.getID()) return;
+        e.propagationStopped = true;
+        this.bulkPress = null;
+        this.clearDropHalo();
+        const ctx = this.bulkDragCtx;
+        if (!press.armed) {
+            if (press.source.kind === 'bag' && ctx) {
+                playBtnClick();
+                ctx.onBagTap(press.source.col);
+            }
+            return;
+        }
+        if (press.hover) {
+            this.flyBulkGhostToDest(press, press.hover);
+            return;
+        }
+        this.snapBulkGhostHome(press, press.hit);
+    }
+
+    private armBulkPress(press: FoodPress) {
+        const ctx = this.bulkDragCtx;
+        if (!ctx) return;
+        press.armed = true;
+        this.busy = true;
+        const hidden = this.bulkSourceFoodNode(press.source);
+        press.hidden = hidden;
+        let flyW = 72;
+        let flyH = 96;
+        if (hidden) {
+            const ui = hidden.getComponent(UITransform);
+            const sc = hidden.worldScale;
+            if (ui) {
+                flyW = Math.max(8, ui.contentSize.width * Math.abs(sc.x));
+                flyH = Math.max(8, ui.contentSize.height * Math.abs(sc.y));
+            }
+            const cardUi = ctx.card.getComponent(UITransform);
+            if (cardUi) press.origin = cardUi.convertToNodeSpaceAR(hidden.worldPosition.clone());
+            this.hideDragSource(hidden);
+        }
+        press.flyW = flyW;
+        press.flyH = flyH;
+        const ghost = new Node('DragGhost');
+        ghost.layer = UI_2D;
+        ghost.setPosition(press.origin);
+        ctx.card.addChild(ghost);
+        ghost.setSiblingIndex(ctx.card.children.length - 1);
+        const shadow = new Node('Shadow');
+        shadow.layer = UI_2D;
+        shadow.setPosition(0, -flyH * 0.42, 0);
+        shadow.addComponent(UITransform).setContentSize(flyW, 16);
+        const shade = shadow.addComponent(Graphics);
+        shade.fillColor = new Color(72, 54, 42, 140);
+        shade.ellipse(0, 0, flyW * 0.36, 5);
+        shade.fill();
+        ghost.addChild(shadow);
+        const frame = this.frameForBag(press.item) || this.frameForFood(press.item);
+        if (!frame) {
+            ghost.destroy();
+            if (hidden) this.showDragSource(hidden);
+            press.armed = false;
+            press.ghost = null;
+            this.busy = false;
+            return;
+        }
+        const flyer = this.addSprite(ghost, 'Flyer', frame, flyW, flyH, 0, 0, Color.WHITE);
+        const flyerUi = flyer.getComponent(UITransform);
+        if (flyerUi) flyerUi.setAnchorPoint(0.5, 0.5);
+        press.flyer = flyer;
+        press.ghost = ghost;
+    }
+
+    private flyBulkGhostToDest(press: FoodPress, dest: Dest) {
+        const ctx = this.bulkDragCtx;
+        const ghost = press.ghost;
+        const flyer = press.flyer;
+        const token = this.foodPressToken;
+        const host = dest.kind === 'tray'
+            ? this.bulkTrayLandNode(this.bulkDestNode(dest))
+            : this.bulkDestNode(dest);
+        const cardUi = ctx?.card.getComponent(UITransform);
+        const finish = () => {
+            if (token !== this.foodPressToken) return;
+            if (ghost && ghost.isValid) ghost.destroy();
+            this.busy = false;
+            this.commitBulkDrop(press, dest);
+        };
+        if (!ctx || !ghost || !flyer || !host || !cardUi) {
+            finish();
+            return;
+        }
+        const toPos = cardUi.convertToNodeSpaceAR(host.worldPosition.clone());
+        const endW = dest.kind === 'tray' ? 48 : BUF_FOOD;
+        const endH = dest.kind === 'tray' ? 48 : BUF_FOOD;
+        const land = new Vec3(endW / Math.max(1, press.flyW), endH / Math.max(1, press.flyH), 1);
+        tween(ghost)
+            .to(FLY_SEC, { position: toPos }, { easing: easing.cubicOut })
+            .start();
+        tween(flyer)
+            .to(FLY_SEC, { scale: land }, { easing: easing.linear })
+            .call(finish)
+            .start();
+    }
+
+    private snapBulkGhostHome(press: FoodPress, hit: Dest | null) {
+        const ghost = press.ghost;
+        const hidden = press.hidden;
+        const token = this.foodPressToken;
+        const back = () => {
+            if (token !== this.foodPressToken) return;
+            if (ghost && ghost.isValid) ghost.destroy();
+            if (hidden && hidden.isValid) this.showDragSource(hidden);
+            this.busy = false;
+            if (!hit) return;
+            const demo = this.bulkDragCtx?.demo;
+            if (demo && hit.kind === 'tray') {
+                const blockedKind = press.source.kind === 'bag'
+                    ? press.item
+                    : demo.counterStacks[press.source.index]?.kind;
+                if (blockedKind && demo.debugRejectsNewTray(blockedKind, hit.index)) {
+                    this.showHomeToast(this.bulkAntiSplitToast(blockedKind));
+                    return;
+                }
+            }
+            if (press.source.kind === 'bag') {
+                this.showHomeToast(hit.kind === 'tray' ? '这件现在进不了这格' : '这件现在进不了这个柜台位');
+                return;
+            }
+            this.showHomeToast(hit.kind === 'tray' ? '这叠现在倒不进这格' : '柜台不能对倒');
+        };
+        if (!ghost) {
+            back();
+            return;
+        }
+        tween(ghost)
+            .to(0.12, { position: press.origin }, { easing: easing.quadOut })
+            .call(back)
+            .start();
+    }
+
+    private commitBulkDrop(press: FoodPress, dest: Dest) {
+        const ctx = this.bulkDragCtx;
+        if (!ctx) return;
+        if (dest.kind === 'tray') {
+            ctx.setTrayTarget(dest.index);
+            ctx.setBagTarget('tray');
+        } else {
+            ctx.setBagTarget('counter');
+        }
+        if (press.source.kind === 'bag') {
+            const slot = dest.kind === 'tray' ? ctx.demo.activeTrays[dest.index] : null;
+            const ok = dest.kind === 'tray'
+                ? ctx.demo.debugPlaceBagTopToTray(press.source.col, dest.index)
+                : ctx.demo.debugPlaceBagTopToCounter(press.source.col, dest.index);
+            if (!ok) return;
+            if (slot) this.playBulkFridgeArrive(slot.sealed);
+            ctx.afterPlace(dest.kind === 'tray' ? dest.index : null);
+            return;
+        }
+        if (dest.kind === 'tray') ctx.pourQuiet(press.source.index, dest.index);
+    }
+
+    private bulkDragCanDrop(press: FoodPress, dest: Dest): boolean {
+        const demo = this.bulkDragCtx?.demo;
+        if (!demo) return false;
+        if (press.source.kind === 'bag') {
+            if (dest.kind === 'tray') return demo.debugCanPlaceBagTopToTray(press.source.col, dest.index);
+            return demo.debugCanPlaceBagTopToCounter(press.source.col, dest.index);
+        }
+        if (dest.kind === 'buffer') return false;
+        return demo.debugCounterCanPour(press.source.index, dest.index);
+    }
+
+    private bulkSourceFoodNode(source: FoodDragSource): Node | null {
+        const ctx = this.bulkDragCtx;
+        if (!ctx) return null;
+        if (source.kind === 'bag') return this.findBulkBagTop(ctx.bagHost, source.col);
+        return ctx.getCounterPanel()?.getChildByName(`Counter${source.index}`)?.getChildByName('Icon') || null;
+    }
+
+    private fingerInBulkCard(e: EventTouch): Vec3 | null {
+        const card = this.bulkDragCtx?.card;
+        const ui = card ? card.getComponent(UITransform) : null;
+        if (!ui) return null;
+        const p = e.getUILocation();
+        return ui.convertToNodeSpaceAR(new Vec3(p.x, p.y, 0));
+    }
+
+    private destAtBulkTouch(e: EventTouch): Dest | null {
+        const ctx = this.bulkDragCtx;
+        if (!ctx) return null;
+        const screen = e.getLocation();
+        const trayDemo = ctx.fridgeZone.getChildByName('TrayDemo');
+        if (trayDemo) {
+            for (let i = ctx.demo.activeTrays.length - 1; i >= 0; i--) {
+                const tray = trayDemo.getChildByName(`BulkTray${i}`);
+                const ui = tray ? tray.getComponent(UITransform) : null;
+                if (ui && ui.hitTest(screen)) return { kind: 'tray', index: i };
+            }
+        }
+        const panel = ctx.getCounterPanel();
+        if (panel) {
+            for (let i = 2; i >= 0; i--) {
+                const slot = panel.getChildByName(`Counter${i}`);
+                const ui = slot ? slot.getComponent(UITransform) : null;
+                if (ui && ui.hitTest(screen)) return { kind: 'buffer', index: i };
+            }
+        }
+        return null;
+    }
+
+    private bulkDestNode(dest: Dest): Node | null {
+        const ctx = this.bulkDragCtx;
+        if (!ctx) return null;
+        if (dest.kind === 'tray') {
+            return ctx.fridgeZone.getChildByName('TrayDemo')?.getChildByName(`BulkTray${dest.index}`) || null;
+        }
+        return ctx.getCounterPanel()?.getChildByName(`Counter${dest.index}`) || null;
+    }
+
+    private bulkFridgeLandNode(board: Node, trayIndex: number): Node | null {
+        const tray = board.getChildByName('TrayDemo')?.getChildByName(`BulkTray${trayIndex}`) || null;
+        return this.bulkTrayLandNode(tray);
+    }
+
+    private bulkTrayLandNode(tray: Node | null): Node | null {
+        if (!tray) return null;
+        return tray.getChildByName('FoodSlot') || tray.getChildByName('Icon') || tray;
+    }
+
+    private playBulkFridgeArrive(sealed: boolean): void {
+        playFridgeDrop();
+        if (!sealed) return;
+        playTrayDoorClose();
+        playTrayDoorVibration();
+    }
+
+    private pulseBulkTrayFood(board: Node, trayIndex: number): void {
+        const slot = this.bulkFridgeLandNode(board, trayIndex);
+        if (!slot || !slot.isValid) return;
+        Tween.stopAllByTarget(slot);
+        slot.setScale(0.78, 0.78, 1);
+        tween(slot)
+            .to(0.16, { scale: new Vec3(1.16, 1.16, 1) }, { easing: easing.cubicOut })
+            .to(0.18, { scale: new Vec3(1, 1, 1) }, { easing: easing.sineOut })
+            .start();
+    }
+
+    private showBulkDropHalo(dest: Dest) {
+        if (this.dropHalo && this.dropHalo.isValid && this.sameDest(this.dropHaloDest, dest)) return;
+        this.clearDropHalo();
+        const ctx = this.bulkDragCtx;
+        const host = this.bulkDestNode(dest);
+        const ui = host ? host.getComponent(UITransform) : null;
+        const cardUi = ctx?.card.getComponent(UITransform) || null;
+        if (!ctx || !host || !ui || !cardUi) return;
+        const box = dest.kind === 'buffer'
+            ? { w: BUF_SLOT_W + 4, h: BUF_SLOT_H + 4, inset: 2, radius: 32 }
+            : { w: BULK_TRAY_W, h: BULK_TRAY_H, inset: 4, radius: 18 };
+        const halo = new Node('DropHalo');
+        halo.layer = UI_2D;
+        const pos = cardUi.convertToNodeSpaceAR(ui.convertToWorldSpaceAR(new Vec3(0, 0, 0)));
+        halo.setPosition(pos);
+        halo.addComponent(UITransform).setContentSize(box.w + 24, box.h + 24);
+        const g = halo.addComponent(Graphics);
+        const x = -box.w / 2 + box.inset;
+        const y = -box.h / 2 + box.inset;
+        const rw = box.w - box.inset * 2;
+        const rh = box.h - box.inset * 2;
+        g.lineWidth = 16;
+        g.strokeColor = new Color(255, 138, 18, 230);
+        g.roundRect(x - 10, y - 10, rw + 20, rh + 20, box.radius + 8);
+        g.stroke();
+        g.lineWidth = 6;
+        g.strokeColor = new Color(255, 226, 48, 255);
+        g.roundRect(x - 2, y - 2, rw + 4, rh + 4, box.radius + 2);
+        g.stroke();
+        const op = halo.addComponent(UIOpacity);
+        op.opacity = 255;
+        ctx.card.addChild(halo);
+        const ghost = ctx.card.getChildByName('DragGhost');
+        if (ghost && ghost !== halo) halo.setSiblingIndex(ghost.getSiblingIndex());
+        else halo.setSiblingIndex(ctx.card.children.length - 1);
+        tween(op)
+            .to(0.3, { opacity: 210 })
+            .to(0.3, { opacity: 255 })
+            .union()
+            .repeatForever()
+            .start();
+        this.dropHalo = halo;
+        this.dropHaloDest = dest;
+    }
+
+    private simulateBulkP6Failure(
+        kind: 'locked_out' | 'buffer_full',
+        board: Node,
+        panel: Node,
+        receipt: Node,
+        demo: BulkPurchaseState,
+        getTrayTargetIndex: () => number | null,
+        extraSync: () => void,
+    ): void {
+        if (kind === 'locked_out') {
+            demo.debugSetTray(0, 'meat', demo.activeTrays[0] ? Math.max(0, demo.activeTrays[0].cap - 1) : 0);
+            demo.debugSetCounter(0, 'milk', 1);
+            demo.debugSetCounter(1, 'meat', 0);
+            demo.debugSetCounter(2, null, 0);
+        } else {
+            demo.debugSetCounter(0, 'veg', 5);
+            demo.debugSetCounter(1, 'fruit', 5);
+            demo.debugSetCounter(2, 'meat', 5);
+        }
+        extraSync();
+        this.syncBulkP4CounterDemo(panel, demo, getTrayTargetIndex(), 'tray');
+        this.syncBulkP5ReceiptDemo(receipt, demo);
+        this.syncBulkP6FailDemo(panel, demo);
+        this.scheduleOnce(() => {
+            if (kind === 'locked_out') {
+                const resolved = demo.debugResolveLockedOut();
+                this.showHomeToast(resolved === 'branch' ? '这格锁错了，退回最近可解分叉' : '这格锁错了，退回本趟开头');
+            } else {
+                const resolved = demo.debugResolveBufferFull();
+                this.showHomeToast(resolved === 'checkpoint' ? '柜台堆满了，退回本趟保底点' : '柜台堆满了，重开本趟');
+            }
+            extraSync();
+            this.syncBulkP4CounterDemo(panel, demo, getTrayTargetIndex(), 'tray');
+            this.syncBulkP5ReceiptDemo(receipt, demo);
+            this.syncBulkP6FailDemo(panel, demo);
+        }, 0.28);
+    }
+
+    private syncBulkP4CounterDemo(
+        panel: Node,
+        demo: BulkPurchaseState,
+        trayIndex: number | null,
+        bagTarget: 'tray' | 'counter' = 'tray',
+    ): void {
+        const slotW = BUF_SLOT_W;
+        const slotH = BUF_SLOT_H;
+        const foodSize = BUF_FOOD;
+        const target = panel.getChildByName('Target');
+        if (target) target.active = false;
+        const oldSelect = panel.getChildByName('CounterSelect');
+        if (oldSelect) oldSelect.destroy();
+        if (bagTarget === 'counter') this.drawBulkCounterSelect(panel);
+        for (let i = 0; i < 3; i++) {
+            const slot = panel.getChildByName(`Counter${i}`);
+            const stack = demo.counterStacks[i];
+            if (!slot || !stack) continue;
+            for (let c = slot.children.length - 1; c >= 0; c--) {
+                const child = slot.children[c];
+                if (child.name !== 'Bg' && child.name !== 'BgArt') child.destroy();
+            }
+            const canPour = bagTarget === 'tray' && trayIndex != null && demo.debugCounterCanPour(i, trayIndex);
+            const fill = stack.count > 0 ? new Color(255, 252, 247, 255) : new Color(240, 235, 228, 255);
+            const stroke = stack.count === 0
+                ? new Color(176, 130, 96, 72)
+                : canPour
+                    ? SAGE
+                    : new Color(160, 130, 120, 180);
+            this.ensureRoundedBg(slot, 'Bg', slotW, slotH, 26, this.bufferBoard ? new Color(0, 0, 0, 0) : fill, stroke);
+            if (stack.kind) {
+                const iconFrame = this.frameForBag(stack.kind) || this.frameForFood(stack.kind);
+                if (iconFrame) {
+                    const icon = this.addSprite(slot, 'Icon', iconFrame, foodSize, foodSize, 0, 10, Color.WHITE);
+                    icon.setScale(1, 1, 1);
+                }
+                const count = this.addLabel(slot, 'Count', `${stack.count}/${stack.cap}`, 22, WALNUT, 88, 26);
+                count.setPosition(0, -46, 0);
+                this.tuneLabel(count, true);
+            }
+        }
+    }
+
+    private syncBulkP6FailDemo(panel: Node, demo: BulkPurchaseState): void {
+        void panel;
+        void demo;
+    }
+
+    private buildBulkP8Footer(card: Node, runId: string, stageIndex: number, stageTotal: number, demo: BulkPurchaseState, nextRunId?: string): void {
+        if (stageIndex + 1 < stageTotal) return;
+        const footer = new Node('BulkFooter');
+        footer.layer = UI_2D;
+        footer.setPosition(0, 0, 0);
+        const footerW = 520;
+        const footerH = 72;
+        footer.addComponent(UITransform).setContentSize(footerW, footerH);
+        const plaque = footer.addComponent(Graphics);
+        plaque.fillColor = new Color(92, 62, 48, 255);
+        plaque.roundRect(-footerW / 2, -footerH / 2, footerW, footerH, 14);
+        plaque.fill();
+        plaque.fillColor = new Color(122, 82, 62, 255);
+        plaque.roundRect(-footerW / 2 + 4, -footerH / 2 + 6, footerW - 8, footerH - 14, 10);
+        plaque.fill();
+        card.addChild(footer);
+
+        const replay = new Node('ReplayBtn');
+        replay.layer = UI_2D;
+        replay.setPosition(-104, -12, 0);
+        replay.addComponent(UITransform).setContentSize(200, 64);
+        this.ensureBulkActionButtonSkin(replay, 200, 64, WALNUT, WALNUT);
+        footer.addChild(replay);
+        const replayText = this.addLabel(replay, 'Label', '再来一局', 26, MILK, 140, 32);
+        replayText.setPosition(0, 0, 0);
+        this.tuneLabel(replayText, true);
+        if (!replay.getComponent(Button)) replay.addComponent(Button);
+        this.bindHudPress(replay, () => this.openBulkPurchaseLayer(runId, 0));
+
+        const close = new Node('CloseBtn');
+        close.layer = UI_2D;
+        close.setPosition(124, -12, 0);
+        close.addComponent(UITransform).setContentSize(200, 64);
+        this.ensureBulkActionButtonSkin(close, 200, 64, nextRunId ? WALNUT : new Color(140, 132, 124, 255), nextRunId ? WALNUT : new Color(140, 132, 124, 255));
+        footer.addChild(close);
+        const closeText = this.addLabel(close, 'Label', nextRunId ? '下一关' : '回主页', 26, MILK, 140, 32);
+        closeText.setPosition(0, 0, 0);
+        this.tuneLabel(closeText, true);
+        if (!close.getComponent(Button)) close.addComponent(Button);
+        this.bindHudPress(close, () => {
+            if (nextRunId) this.openBulkPurchaseLayer(nextRunId, 0);
+            else this.closeBulkPurchaseLayer();
+        });
+    }
+
+    private syncBulkP8Footer(footer: Node, demo: BulkPurchaseState, hasNextStage: boolean): void {
+        if (!hasNextStage) return;
+        const title = footer.getChildByName('Title');
+        const titleLabel = title ? title.getComponent(Label) : null;
+        const statusChip = footer.getChildByName('StatusChip');
+        const statusLabel = statusChip?.getChildByName('Status')?.getComponent(Label) || null;
+        const ready = demo.isStageResolved();
+        if (titleLabel) titleLabel.string = '';
+        if (statusLabel) {
+            statusLabel.string = ready ? '本趟已收好' : '本趟未完成';
+            statusLabel.color = ready ? new Color(210, 232, 196, 255) : MILK;
+        }
+    }
+
+    private openBulkGuideLayer(parent: Node): void {
+        const old = parent.getChildByName('BulkGuideLayer');
+        if (old) old.destroy();
+        const tips = [
+            '这是大容量格，看 0/12 这种数字，不看小坑位。',
+            '格子收满会搬走，下面「收满后补进」会换上新格。',
+            '柜台 1 格能叠同种，短按 +1，长按会连续倒入。',
+            '购物小票只记还没进冰箱的件数，不是可操作区。',
+        ];
+        let index = 0;
+        const layer = new Node('BulkGuideLayer');
+        layer.layer = UI_2D;
+        layer.addComponent(UITransform).setContentSize(720, 1280);
+        parent.addChild(layer);
+        const dim = layer.addComponent(Graphics);
+        dim.fillColor = new Color(61, 50, 41, 138);
+        dim.rect(-360, -640, 720, 1280);
+        dim.fill();
+        const card = new Node('GuideCard');
+        card.layer = UI_2D;
+        card.setPosition(0, 0, 0);
+        card.addComponent(UITransform).setContentSize(560, 300);
+        const g = card.addComponent(Graphics);
+        g.fillColor = new Color(255, 252, 247, 255);
+        g.roundRect(-280, -150, 560, 300, 30);
+        g.fill();
+        layer.addChild(card);
+        const step = this.addLabel(card, 'Step', '', 20, FRAME, 200, 24);
+        step.setPosition(0, 84, 0);
+        const body = this.addLabel(card, 'Body', '', 28, WALNUT, 440, 120);
+        body.setPosition(0, 10, 0);
+        const bodyLabel = body.getComponent(Label);
+        if (bodyLabel) {
+            bodyLabel.enableWrapText = true;
+            bodyLabel.lineHeight = 38;
+        }
+        const next = new Node('NextBtn');
+        next.layer = UI_2D;
+        next.setPosition(0, -90, 0);
+        next.addComponent(UITransform).setContentSize(220, 62);
+        this.ensureBulkActionButtonSkin(next, 220, 62, WALNUT, WALNUT);
+        card.addChild(next);
+        const nextText = this.addLabel(next, 'Label', '下一条', 26, MILK, 120, 30);
+        nextText.setPosition(0, 0, 0);
+        if (!next.getComponent(Button)) next.addComponent(Button);
+        const sync = () => {
+            const stepLabel = step.getComponent(Label);
+            if (stepLabel) stepLabel.string = `新手提示 ${index + 1}/4`;
+            const bodyText = body.getComponent(Label);
+            if (bodyText) bodyText.string = tips[index];
+            const buttonText = nextText.getComponent(Label);
+            if (buttonText) buttonText.string = index + 1 >= tips.length ? '知道了' : '下一条';
+        };
+        this.bindHudPress(next, () => {
+            index += 1;
+            if (index >= tips.length) {
+                sys.localStorage.setItem(BULK_GUIDE_SEEN_KEY, '1');
+                if (layer.isValid) layer.destroy();
+                return;
+            }
+            sync();
+        });
+        sync();
+    }
+
+    private addBulkP3TrayCard(
+        parent: Node,
+        cap: number,
+        filled: number,
+        kind: FoodId | null,
+        x: number,
+        y: number,
+        tone: 'selected' | 'receivable' | 'idle' | 'blocked',
+        index: number,
+    ): Node {
+        const node = new Node(`BulkTray${index}`);
+        node.layer = UI_2D;
+        node.setPosition(x, y, 0);
+        const outerW = BULK_TRAY_W;
+        const outerH = BULK_TRAY_H;
+        const frame = 12;
+        const slotW = outerW - frame * 2;
+        const slotH = outerH - frame * 2;
+        const selected = tone === 'selected';
+        const closed = tone === 'blocked';
+        node.addComponent(UITransform).setContentSize(outerW, outerH);
+        parent.addChild(node);
+        const gNode = new Node('Cell');
+        gNode.layer = UI_2D;
+        gNode.addComponent(UITransform).setContentSize(outerW, outerH);
+        const g = gNode.addComponent(Graphics);
+        g.fillColor = selected ? WALNUT : FRAME;
+        g.roundRect(-outerW / 2, -outerH / 2, outerW, outerH, 24);
+        g.fill();
+        if (closed) {
+            this.paintDoor(g, slotW, slotH);
+        } else {
+            g.fillColor = selected ? new Color(236, 248, 255, 255) : new Color(198, 210, 214, 255);
+            g.roundRect(-slotW / 2, -slotH / 2, slotW, slotH, 14);
+            g.fill();
+            const glowR = selected ? 18 : 12;
+            g.fillColor = selected ? new Color(255, 255, 255, 200) : new Color(255, 255, 255, 70);
+            g.circle(0, slotH / 2 - 16, glowR);
+            g.fill();
+        }
+        node.addChild(gNode);
+        if (selected && !closed) this.drawCoralFramePulse(node, outerW, outerH, 4, 16, SELECT_PULSE_ICE, SELECT_PULSE_ICE_SOFT);
+
+        const foodSlot = new Node('FoodSlot');
+        foodSlot.layer = UI_2D;
+        foodSlot.setPosition(-48, 2, 0);
+        foodSlot.addComponent(UITransform).setContentSize(48, 48);
+        node.addChild(foodSlot);
+        const iconFrame = kind ? this.frameForBag(kind) : null;
+        if (iconFrame) {
+            this.addSprite(foodSlot, 'Icon', iconFrame, 48, 48, 0, 0, Color.WHITE);
+        }
+
+        const count = this.addLabel(node, 'Count', `${filled}/${cap}`, 32, WALNUT, 100, 40);
+        count.setPosition(24, 4, 0);
+        this.tuneLabel(count, true);
+
+        const progressBg = new Node('ProgressBg');
+        progressBg.layer = UI_2D;
+        progressBg.setPosition(18, -30, 0);
+        progressBg.addComponent(UITransform).setContentSize(96, 10);
+        const progressBgG = progressBg.addComponent(Graphics);
+        progressBgG.fillColor = new Color(221, 212, 201, 255);
+        progressBgG.roundRect(-48, -5, 96, 10, 5);
+        progressBgG.fill();
+        node.addChild(progressBg);
+
+        const progressFill = new Node('ProgressFill');
+        progressFill.layer = UI_2D;
+        const fillW = Math.round((Math.max(0, Math.min(filled, cap)) / Math.max(cap, 1)) * 96);
+        progressFill.setPosition(-48, 0, 0);
+        progressFill.addComponent(UITransform).setContentSize(fillW, 10);
+        const progressFillG = progressFill.addComponent(Graphics);
+        progressFillG.fillColor = tone === 'selected' ? SELECT_PULSE_BLUE : SAGE;
+        progressFillG.roundRect(0, -5, fillW, 10, 5);
+        progressFillG.fill();
+        progressBg.addChild(progressFill);
+        progressBg.active = false;
+        return node;
     }
 
     private openSettingsLayer(): void {
@@ -3159,6 +5109,35 @@ export class GameController extends Component {
         if (pad) pad.setSiblingIndex(slot.children.length - 1);
     }
 
+    /** 周末大采购：整柜选中框，对标主线柜台格呼吸描边。 */
+    private drawBulkCounterSelect(panel: Node): void {
+        const w = 640;
+        const h = 168;
+        const frame = new Node('CounterSelect');
+        frame.layer = UI_2D;
+        frame.setPosition(0, BUF_WELL_Y - 10, 0);
+        frame.addComponent(UITransform).setContentSize(w + 28, h + 28);
+        const g = frame.addComponent(Graphics);
+        g.fillColor = new Color(45, 156, 255, 46);
+        g.roundRect(-w / 2 - 10, -h / 2 - 10, w + 20, h + 20, 36);
+        g.fill();
+        g.lineWidth = 8;
+        g.strokeColor = SELECT_PULSE_ICE;
+        g.roundRect(-w / 2 - 2, -h / 2 - 2, w + 4, h + 4, 32);
+        g.stroke();
+        g.lineWidth = 3;
+        g.strokeColor = MILK;
+        g.roundRect(-w / 2 + 7, -h / 2 + 7, w - 14, h - 14, 26);
+        g.stroke();
+        panel.addChild(frame);
+        frame.setSiblingIndex(1);
+        this.drawCoralFramePulse(frame, w, h, 2, 32, SELECT_PULSE_ICE, SELECT_PULSE_ICE_SOFT);
+        frame.setScale(0.96, 0.96, 1);
+        tween(frame)
+            .to(0.08, { scale: new Vec3(1, 1, 1) }, { easing: easing.quadOut })
+            .start();
+    }
+
     /** 贴住奶油凹盘外沿：槽内暖光 + 珊瑚描边 + 奶色内圈。 */
     private drawBufferSelect(slot: Node) {
         const w = BUF_SLOT_W;
@@ -4963,6 +6942,10 @@ export class GameController extends Component {
         }
     }
 
+    private bulkAntiSplitToast(item: FoodId): string {
+        return `${FOOD_NAMES[item]}那格还没收满，不能新开一格`;
+    }
+
     private toastFor(result: PlaceFail): string {
         if (result.reason === 'need_buffer') {
             return '冰箱放不下，先放到柜台';
@@ -5134,6 +7117,130 @@ export class GameController extends Component {
         return node;
     }
 
+    private ensureSpriteBg(
+        parent: Node,
+        bgName: string,
+        w: number,
+        h: number,
+        frame: SpriteFrame | null | undefined,
+        z = -1,
+    ): Node | null {
+        let bg = parent.getChildByName(bgName);
+        if (!frame) {
+            if (bg) bg.destroy();
+            return null;
+        }
+        if (!bg) {
+            bg = new Node(bgName);
+            bg.layer = UI_2D;
+            parent.addChild(bg);
+        }
+        // UI 背景图不再依赖负 z，直接固定为最底层 sibling，避免 Sprite 在某些预览路径里被吞。
+        bg.setPosition(0, 0, 0);
+        bg.addComponent(UITransform).setContentSize(w, h);
+        const oldGraphics = bg.getComponent(Graphics);
+        if (oldGraphics) oldGraphics.destroy();
+        const sp = bg.getComponent(Sprite) ?? bg.addComponent(Sprite);
+        sp.sizeMode = Sprite.SizeMode.CUSTOM;
+        sp.type = Sprite.Type.SIMPLE;
+        sp.color = Color.WHITE;
+        sp.spriteFrame = frame;
+        bg.setSiblingIndex(0);
+        return bg;
+    }
+
+    private ensureBulkPillSkin(
+        parent: Node,
+        bgName: string,
+        w: number,
+        h: number,
+        radius: number,
+        tint: Color,
+        fillFallback: Color,
+        strokeFallback: Color | null,
+        lineWidth = 2,
+    ): void {
+        this.ensureRoundedBg(parent, bgName, w, h, radius, fillFallback, strokeFallback, lineWidth);
+    }
+
+    private ensureBulkActionButtonSkin(
+        parent: Node,
+        w: number,
+        h: number,
+        tint: Color,
+        fillFallback: Color,
+    ): void {
+        const art = this.ensureSpriteBg(parent, 'BgArt', w, h, this.btnStart, -2);
+        const artSprite = art?.getComponent(Sprite) || null;
+        if (artSprite) {
+            artSprite.color = tint;
+            const oldBg = parent.getChildByName('Bg');
+            if (oldBg) oldBg.destroy();
+            return;
+        }
+        this.ensureRoundedBg(parent, 'Bg', w, h, 24, fillFallback);
+    }
+
+    private ensureRaisedPlate(
+        parent: Node,
+        bgName: string,
+        w: number,
+        h: number,
+        radius: number,
+        fillColor: Color,
+        strokeColor: Color,
+        shadowColor: Color,
+        shadowOffsetY: number,
+    ): void {
+        const shadow = this.ensureRoundedBg(parent, `${bgName}Shadow`, w, h, radius, shadowColor, null, 0, -3);
+        shadow.setPosition(0, shadowOffsetY, -3);
+        this.ensureRoundedBg(parent, bgName, w, h, radius, fillColor, strokeColor, 3, -2);
+    }
+
+    /**
+     * 资源接入准备：把灰盒底板拆成独立 Bg 子节点，后面替 sprite / 9-slice 时不必改业务节点结构。
+     */
+    private ensureRoundedBg(
+        parent: Node,
+        bgName: string,
+        w: number,
+        h: number,
+        radius: number,
+        fillColor: Color,
+        strokeColor: Color | null = null,
+        lineWidth = 3,
+        z = -1,
+    ): Node {
+        let bg = parent.getChildByName(bgName);
+        if (!bg) {
+            bg = new Node(bgName);
+            bg.layer = UI_2D;
+            parent.addChild(bg);
+        }
+        bg.setPosition(0, 0, z);
+        bg.addComponent(UITransform).setContentSize(w, h);
+        const g = bg.getComponent(Graphics) ?? bg.addComponent(Graphics);
+        g.clear();
+        g.fillColor = fillColor;
+        g.roundRect(-w / 2, -h / 2, w, h, radius);
+        g.fill();
+        if (strokeColor) {
+            g.lineWidth = lineWidth;
+            g.strokeColor = strokeColor;
+            g.roundRect(-w / 2, -h / 2, w, h, radius);
+            g.stroke();
+        }
+        return bg;
+    }
+
+    private tuneLabel(node: Node, bold = false): void {
+        const lb = node.getComponent(Label);
+        if (!lb) return;
+        lb.fontFamily = 'Microsoft YaHei';
+        lb.isBold = bold;
+        lb.overflow = Label.Overflow.SHRINK;
+    }
+
     private addLabel(
         parent: Node,
         name: string,
@@ -5175,14 +7282,57 @@ interface WechatWindowInfo {
     safeArea?: { top: number };
 }
 
+let uiBundle: Promise<boolean> | null = null;
+let uiBundleLogged = false;
+
+function ensureUiBundle(): Promise<boolean> {
+    if (assetManager.getBundle('ui')) return Promise.resolve(true);
+    if (uiBundle) return uiBundle;
+    uiBundle = new Promise((resolve) => {
+        assetManager.loadBundle('ui', (err) => {
+            if (err) {
+                uiBundle = null;
+                if (!uiBundleLogged) {
+                    uiBundleLogged = true;
+                    console.error('[fridge] 界面图包没进微信构建，请重新构建');
+                }
+                resolve(false);
+                return;
+            }
+            resolve(true);
+        });
+    });
+    return uiBundle;
+}
+
 function loadFrame(uuid: string): Promise<SpriteFrame | null> {
-    return new Promise((resolve) => {
+    return ensureUiBundle().then((ready) => {
+        if (!ready) return null;
+        return new Promise<SpriteFrame | null>((resolve) => {
         assetManager.loadAny({ uuid }, (err, asset) => {
             if (err || !asset) {
                 resolve(null);
                 return;
             }
-            resolve(asset as SpriteFrame);
+            if (asset instanceof SpriteFrame) {
+                resolve(asset);
+                return;
+            }
+            if (asset instanceof Texture2D) {
+                const frame = new SpriteFrame();
+                frame.texture = asset;
+                resolve(frame);
+                return;
+            }
+            const maybeTexture = (asset as { texture?: Texture2D | null }).texture;
+            if (maybeTexture instanceof Texture2D) {
+                const frame = new SpriteFrame();
+                frame.texture = maybeTexture;
+                resolve(frame);
+                return;
+            }
+            resolve(null);
+        });
         });
     });
 }

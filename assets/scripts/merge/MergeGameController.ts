@@ -22,7 +22,6 @@ import {
     SpriteFrame,
     sys,
     tween,
-    view,
     UIOpacity,
     UITransform,
     Vec2,
@@ -32,6 +31,8 @@ import {
 } from 'cc';
 import { MergeBall } from './MergeBall';
 import { playMergeSfx } from './MergeSfx';
+import { visibleDesignSize } from '../game/visibleDesignSize';
+import { prefetchShareScreenshot, setSharePayload, shareFromUserTap } from '../game/Share';
 
 const { ccclass } = _decorator;
 const UI_2D = Layers.Enum.UI_2D;
@@ -188,7 +189,7 @@ export class MergeGameController extends Component {
     /** 可见区域。宽适配时高度会超过 1280，画布中心仍是 (0,0)。 */
     private measureScreen(): void {
         const parentUi = this.node.parent?.getComponent(UITransform);
-        const vis = view.getVisibleSize();
+        const vis = visibleDesignSize();
         this.screenW = Math.max(parentUi?.width || 0, vis.width || 0, DESIGN_W);
         this.screenH = Math.max(parentUi?.height || 0, vis.height || 0, DESIGN_H);
     }
@@ -925,13 +926,16 @@ export class MergeGameController extends Component {
         this.node.addChild(layer);
         this.gameOverLayer = layer;
 
-        const panel = this.roundRectNode('Panel', 530, 330, CREAM, 34, FRAME, 4);
+        const panel = this.roundRectNode('Panel', 530, 400, CREAM, 34, FRAME, 4);
         panel.setPosition(0, 20);
         layer.addChild(panel);
-        this.addLabel(panel, 'Title', '冰箱装满啦', 40, WALNUT, 440, 58, 0, 100);
-        this.addLabel(panel, 'Score', `本局 ${this.score}　最高 ${this.best}`, 28, SAGE, 450, 48, 0, 35);
+        this.addLabel(panel, 'Title', '冰箱装满啦', 40, WALNUT, 440, 58, 0, 118);
+        this.addLabel(panel, 'Score', `本局 ${this.score}　最高 ${this.best}`, 28, SAGE, 450, 48, 0, 48);
+        const shareTitle = `今晚大果盘本局 ${this.score} 分，来一起合`;
+        setSharePayload({ title: shareTitle, query: `from=merge&score=${this.score}` });
+
         const again = this.roundRectNode('BtnAgain', 300, 82, CORAL, 30, new Color(184, 87, 67, 255), 3);
-        again.setPosition(0, -75);
+        again.setPosition(0, -52);
         again.addComponent(Button);
         this.addLabel(again, 'Label', '再合一次', 30, MILK, 260, 48, 0, 0);
         again.on(Node.EventType.TOUCH_END, (event: EventTouch) => {
@@ -940,6 +944,22 @@ export class MergeGameController extends Component {
             this.startRound();
         }, this);
         panel.addChild(again);
+
+        const shareBtn = this.roundRectNode('BtnShare', 300, 80, MILK, 30, new Color(107, 74, 58, 90), 3);
+        shareBtn.setPosition(0, -152);
+        shareBtn.addComponent(Button);
+        this.addLabel(shareBtn, 'Label', '分享本局', 28, WALNUT, 260, 44, 0, 0);
+        shareBtn.on(Node.EventType.TOUCH_END, (event: EventTouch) => {
+            event.propagationStopped = true;
+            playMergeSfx('click');
+            shareFromUserTap({
+                title: shareTitle,
+                query: `from=merge&score=${this.score}`,
+            });
+        }, this);
+        panel.addChild(shareBtn);
+
+        this.scheduleOnce(() => prefetchShareScreenshot(), 0.2);
     }
 
     private updateScore(): void {

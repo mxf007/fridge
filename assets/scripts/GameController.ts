@@ -24,12 +24,12 @@ import {
     sys,
     Tween,
     tween,
-    view,
 } from 'cc';
 import { BoardState } from './game/BoardState';
 import { packTrayGrid, TRAY_GAP, TRAY_WALL_H, TRAY_WALL_TOP, TRAY_WALL_W } from './game/levelLayout';
 import { albumStatusLine, noteAlbumWin, prepareAlbum, visibleAlbumGrade, winStepLine } from './game/AlbumState';
 import { levelById as levelDefById, nextPlayable as nextPlayableLevel, PLAYABLE } from './game/playableLevels';
+import { visibleDesignSize } from './game/visibleDesignSize';
 import {
     isSfxEnabled,
     isVibrationEnabled,
@@ -50,6 +50,14 @@ import { BulkPurchaseState } from './bulk/BulkPurchaseState';
 import type { BulkRunDef } from './bulk/types';
 import { bulkPrototypeIndex, loadBulkPrototype, nextBulkRunId, validateBulkPrototype } from './bulk/prototypeRuns';
 import { openMergeGame } from './merge/MergeGameController';
+import {
+    installWechatShareMenu,
+    prefetchShareScreenshot,
+    setSharePayload,
+    shareFromUserTap,
+    shareQueryForLevel,
+    SharePayload,
+} from './game/Share';
 
 const { ccclass, property } = _decorator;
 
@@ -402,6 +410,7 @@ export class GameController extends Component {
 
     onLoad() {
         // 自检含可见信息审计，同步跑会把预览进度条卡住。用 tools/run_level_selfchecks_19_30.ts。
+        installWechatShareMenu();
         this.bindGm();
         this.bindHome();
         this.fitHomeBackground();
@@ -1175,7 +1184,8 @@ export class GameController extends Component {
         card.addChild(share);
         const protoIndex = bulkPrototypeIndex(runId);
         this.bindHudPress(share, () => {
-            this.showHomeToast(`第 ${protoIndex + 1} 关这层我收不进去了`);
+            const id = protoIndex + 1;
+            this.invokeShare(`第 ${id} 关这层我收不进去了，来一起收冰箱`, id, `第 ${id} 关这层我收不进去了`);
         });
 
         const retry = this.addLabel(card, 'FailRetry', '重开本关', 26, new Color(107, 74, 58, 153), 280, 40);
@@ -1345,7 +1355,8 @@ export class GameController extends Component {
             else this.closeBulkPurchaseLayer();
         });
         this.bindHudPress(shareBtn, () => {
-            this.showHomeToast(`第 ${protoIndex + 1} 关我收好了，用了 ${steps} 步`);
+            const id = protoIndex + 1;
+            this.invokeShare(`我把第 ${id} 关收好了，用了 ${steps} 步`, id, `第 ${id} 关我收好了，用了 ${steps} 步`);
         });
     }
 
@@ -3344,11 +3355,34 @@ export class GameController extends Component {
             playBtnClick();
             close();
         }, this);
+        const steps = entry?.bestSteps;
+        const title = steps != null
+            ? `第 ${levelId} 关我收好了，用了 ${steps} 步`
+            : `第 ${levelId} 关冰箱收好了，来一起收`;
+        const preview = steps != null
+            ? `第 ${levelId} 关 · ${steps} 步`
+            : `第 ${levelId} 关冰箱`;
+        const payload: SharePayload = { title, query: shareQueryForLevel(levelId) };
+        const ok = shareFromUserTap(payload);
+        if (!ok) this.showSharePreview(preview, payload);
         this.scheduleOnce(close, 2.4);
     }
 
-    /** 分享预览：叠 share_win 成品图 + 文案 Toast，不挡返回。 */
-    private showSharePreview(tip: string) {
+    /** 微信：截屏正中作 imageUrl；预览/编辑器回退用 share_win 或 Toast。 */
+    private invokeShare(title: string, levelId: number | null, previewTip?: string): void {
+        const query = levelId != null ? shareQueryForLevel(levelId) : undefined;
+        const payload: SharePayload = { title, query };
+        const ok = shareFromUserTap(payload);
+        if (ok) return;
+        if (previewTip) this.showSharePreview(previewTip, payload);
+        else this.showToast(title);
+    }
+
+    /**
+     * 分享预览：叠 share_win 成品图 + 底部文案。
+     * 图上的「分享步数」是 PNG 装饰，须另加热区；retry 在用户点击同步栈里再次 shareAppMessage。
+     */
+    private showSharePreview(tip: string, retry?: SharePayload) {
         const old = this.node.getChildByName('SharePreview');
         if (old) old.destroy();
         const size = this.canvasSize();
@@ -3357,12 +3391,30 @@ export class GameController extends Component {
         layer.addComponent(UITransform).setContentSize(size.w, size.h);
         this.node.addChild(layer);
         const dim = this.addSprite(layer, 'Dim', this.builtin, size.w, size.h, 0, 0, new Color(48, 48, 48, 160));
+        const artH = 650;
+        const artY = 40;
         if (this.shareWin) {
-            const art = this.addSprite(layer, 'Art', this.shareWin, 520, 650, 0, 40, Color.WHITE);
+            const art = this.addSprite(layer, 'Art', this.shareWin, 520, artH, 0, artY, Color.WHITE);
             art.setScale(0.92, 0.92, 1);
             tween(art)
                 .to(0.28, { scale: new Vec3(1, 1, 1) }, { easing: easing.backOut })
                 .start();
+        }
+        if (retry) {
+            // share_win 源图 720×900，「分享步数」芯片中心约 (360,650) → 相对精灵中心 y≈-144
+            const chipY = artY - ((650 - 450) / 900) * artH;
+            const hit = new Node('PreviewShareHit');
+            hit.layer = UI_2D;
+            hit.setPosition(0, chipY, 0);
+            hit.addComponent(UITransform).setContentSize(420, 96);
+            layer.addChild(hit);
+            this.bindHudPress(hit, () => {
+                if (shareFromUserTap(retry)) {
+                    if (layer.isValid) layer.destroy();
+                } else {
+                    this.showToast('分享未唤起，请用右上角 ··· 转发');
+                }
+            });
         }
         this.addLabel(layer, 'Tip', tip, 24, MILK, 600, 40).setPosition(0, -360, 0);
         const close = () => {
@@ -3542,6 +3594,10 @@ export class GameController extends Component {
         this.ensurePlayRoot();
         this.playRoot.active = true;
         this.render();
+        setSharePayload({
+            title: `今晚冰箱 · 第 ${level.id} 关，来一起收`,
+            query: shareQueryForLevel(level.id),
+        });
     }
 
     /**
@@ -3587,7 +3643,7 @@ export class GameController extends Component {
     private canvasSize(): { w: number; h: number } {
         const ui = this.node.getComponent(UITransform);
         if (ui && ui.width > 0 && ui.height > 0) return { w: ui.width, h: ui.height };
-        const vis = view.getVisibleSize();
+        const vis = visibleDesignSize();
         return { w: vis.width || DESIGN_W, h: vis.height || DESIGN_H };
     }
 
@@ -3691,7 +3747,7 @@ export class GameController extends Component {
     /** 微信刘海和右上角胶囊以下。编辑器里按顶栏 96px。只动 HUD。 */
     private hudY(): number {
         const canvasUi = this.node.getComponent(UITransform);
-        const canvasH = canvasUi && canvasUi.height > 0 ? canvasUi.height : view.getVisibleSize().height;
+        const canvasH = canvasUi && canvasUi.height > 0 ? canvasUi.height : visibleDesignSize().height;
         const top = canvasH / 2;
         const inset = this.wechatTopInset();
         return top - inset - 8 - 44;
@@ -3701,7 +3757,7 @@ export class GameController extends Component {
         const fallback = 96;
         const wxApi = (globalThis as { wx?: WechatMiniGame }).wx;
         if (!wxApi) return fallback;
-        const visibleW = view.getVisibleSize().width || DESIGN_W;
+        const visibleW = visibleDesignSize().width || DESIGN_W;
         try {
             const info = wxApi.getWindowInfo ? wxApi.getWindowInfo() : wxApi.getSystemInfoSync?.();
             const windowW = info && (info.windowWidth || info.screenWidth);
@@ -3839,6 +3895,7 @@ export class GameController extends Component {
         }
         this.refreshAlbumLink();
         this.polishHomeChrome();
+        setSharePayload({ title: '今晚冰箱，来一起收一层' });
         const mile = this.pendingMilestone;
         if (mile != null) {
             this.pendingMilestone = null;
@@ -3914,7 +3971,7 @@ export class GameController extends Component {
             this.markMilestoneSeen(n);
             if (layer.isValid) layer.destroy();
             this.refreshAlbumLink();
-            this.showSharePreview(`今晚已收 ${n} 关，来一起收冰箱`);
+            this.invokeShare(`今晚已收 ${n} 关，来一起收冰箱`, null, `今晚已收 ${n} 关，来一起收冰箱`);
         });
         this.bindHudPress(skip, () => close());
 
@@ -6253,9 +6310,7 @@ export class GameController extends Component {
         card.addChild(share);
         const levelId = board.level.id;
         this.bindHudPress(share, () => {
-            this.showToast(`第 ${levelId} 关这层我收不进去了`);
-            this.busy = false;
-            this.startLevel(board.level);
+            this.invokeShare(`第 ${levelId} 关这层我收不进去了，来一起收冰箱`, levelId, `第 ${levelId} 关这层我收不进去了`);
         });
 
         const retry = this.addLabel(card, 'FailRetry', '重开本关', 26, new Color(107, 74, 58, 153), 280, 40);
@@ -6612,8 +6667,9 @@ export class GameController extends Component {
             this.startLevel(next);
         });
         this.bindHudPress(shareBtn, () => {
-            this.showSharePreview(`我把今晚的冰箱收好了，用了 ${steps} 步`);
+            this.invokeShare(`我把第 ${levelId} 关收好了，用了 ${steps} 步`, levelId, `我把今晚的冰箱收好了，用了 ${steps} 步`);
         });
+        this.scheduleOnce(() => prefetchShareScreenshot(), 0.2);
     }
 
     private drawSpark(parent: Node, x: number, y: number, r: number, color: Color) {

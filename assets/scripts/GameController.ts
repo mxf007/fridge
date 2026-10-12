@@ -28,6 +28,7 @@ import {
 import { BoardState } from './game/BoardState';
 import { packTrayGrid, TRAY_GAP, TRAY_WALL_H, TRAY_WALL_TOP, TRAY_WALL_W } from './game/levelLayout';
 import { albumStatusLine, noteAlbumWin, prepareAlbum, visibleAlbumGrade, winStepLine } from './game/AlbumState';
+import { CLEARED_KEY, MILESTONE_NS, milestoneKey, pullCloudProgress, pushCloudProgress } from './game/CloudSave';
 import { levelById as levelDefById, nextPlayable as nextPlayableLevel, PLAYABLE } from './game/playableLevels';
 import { visibleDesignSize } from './game/visibleDesignSize';
 import {
@@ -227,12 +228,9 @@ const SETTINGS_CARD_W = 560;
 const SETTINGS_CARD_H = 600;
 const SETTINGS_TOGGLE_W = 92;
 const SETTINGS_TOGGLE_H = 44;
-const CLEARED_KEY = 'fridge_cleared';
-const MILESTONE_KEY = (n: number) => `fridge_milestone_${n}`;
 const BULK_GUIDE_SEEN_KEY = 'bulk_weekend_guide_seen';
 /** 新手引导先藏着，下个版本再开。 */
 const BULK_GUIDE_ENABLED = false;
-const MILESTONE_NS = [10, 20, 30];
 /** 图鉴主面板尺寸（相对原 980 加高 200 试看）。 */
 const ALBUM_PANEL_W = 640;
 const ALBUM_PANEL_H = 1180;
@@ -435,6 +433,7 @@ export class GameController extends Component {
         this.fitHomeBackground();
         this.refreshAlbumLink();
         void preloadSfx();
+        this.bindCloudSave();
         void this.ensureLevel1Frames();
         void this.ensureRestFrames();
         void this.ensureAlbumFrames();
@@ -3034,6 +3033,7 @@ export class GameController extends Component {
         }
         const cleared = this.clearedId();
         const album = prepareAlbum(sys.localStorage, cleared, (id) => this.levelById(id));
+        void pushCloudProgress(sys.localStorage);
         this.addLabel(panel, 'Progress', `${cleared} / ${PLAYABLE.length}`, 26, SAGE, 200, 36).setPosition(0, 372, 0);
         this.addLabel(panel, 'ReplayHint', '点一下再收 · 按住可分享', 20, FRAME, 480, 28).setPosition(0, 340, 0);
 
@@ -3581,11 +3581,35 @@ export class GameController extends Component {
     }
 
     private milestoneSeen(n: number): boolean {
-        return sys.localStorage.getItem(MILESTONE_KEY(n)) === '1';
+        return sys.localStorage.getItem(milestoneKey(n)) === '1';
     }
 
     private markMilestoneSeen(n: number) {
-        sys.localStorage.setItem(MILESTONE_KEY(n), '1');
+        sys.localStorage.setItem(milestoneKey(n), '1');
+        void pushCloudProgress(sys.localStorage);
+    }
+
+    /** 本机先用。云端合并完成后，在主页刷新图鉴；对局中先记下，回主页再生效。 */
+    private bindCloudSave() {
+        const before = this.clearedId();
+        void pullCloudProgress(sys.localStorage).then((changed) => {
+            if (!changed || !this.node || !this.node.isValid) return;
+            prepareAlbum(sys.localStorage, this.clearedId(), (id) => this.levelById(id));
+            void pushCloudProgress(sys.localStorage);
+            const after = this.clearedId();
+            for (let i = 0; i < MILESTONE_NS.length; i++) {
+                const m = MILESTONE_NS[i];
+                if (before < m && after >= m && !this.milestoneSeen(m)) this.pendingMilestone = m;
+            }
+            if (this.board) return;
+            this.refreshAlbumLink();
+            if (this.node.getChildByName('AlbumLayer')) this.openAlbum();
+            const mile = this.pendingMilestone;
+            if (mile != null && !this.node.getChildByName('MilestoneCard')) {
+                this.pendingMilestone = null;
+                this.spawnMilestoneCard(mile);
+            }
+        });
     }
 
     private clearedId(): number {
@@ -6516,6 +6540,7 @@ export class GameController extends Component {
             (id) => this.levelById(id),
         );
         this.markCleared(board.level.id);
+        void pushCloudProgress(sys.localStorage);
         this.pulseSealedFridge(root);
         this.spawnPrideFlash(root);
 

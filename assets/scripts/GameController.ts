@@ -84,16 +84,27 @@ const BULK_BAG_ZONE_Y = -300;
 const BULK_BAG_ZONE_H = 380;
 const BULK_FOOTER_Y = -614;
 /** 周末大采购上半区：2×2 大格 + 右小票，贴主线冰箱墙，不另铺大底板。 */
-const BULK_TRAY_W = 190;
-const BULK_TRAY_H = 92;
-const BULK_TRAY_GAP = 18;
-const BULK_TRAY_DX = (BULK_TRAY_W + BULK_TRAY_GAP) / 2;
-const BULK_TRAY_DY = (BULK_TRAY_H + BULK_TRAY_GAP) / 2;
-const BULK_TRAY_BLOCK_X = -80;
-const BULK_CLUSTER_Y = 288;
+const BULK_TRAY_W = 180;
+const BULK_TRAY_H = 108;
+const BULK_TRAY_GAP_X = 26;
+const BULK_TRAY_GAP_Y = 28;
+const BULK_TRAY_DX = (BULK_TRAY_W + BULK_TRAY_GAP_X) / 2;
+const BULK_TRAY_DY = (BULK_TRAY_H + BULK_TRAY_GAP_Y) / 2;
+const BULK_TRAY_BLOCK_X = -96;
+const BULK_CLUSTER_Y = 198;
 const BULK_RECEIPT_W = 148;
-const BULK_RECEIPT_H = 276;
+const BULK_RECEIPT_H = 232;
 const BULK_RECEIPT_X = 214;
+/** zhoumo_caigou_title.png 原像素 300×79，上屏 1.2 倍，再相对顶栏上移 30。 */
+const BULK_TITLE_W = 360;
+const BULK_TITLE_H = 95;
+const BULK_TITLE_LIFT = 30;
+/** 关卡胶囊按 148×40 放大 1.5 倍。中心仍钉在放大前的位置，不跟着标题上移。 */
+const BULK_LEVEL_PILL_W = 222;
+const BULK_LEVEL_PILL_H = 60;
+const BULK_LEVEL_FONT = 33;
+const BULK_LEVEL_LINE = 42;
+const BULK_LEVEL_Y_OFFSET = 67.5;
 const WALNUT_SOFT = new Color(107, 74, 58, 168);
 /** ≥5 列折两排：前排靠柜台，后排靠冰箱；深栈进后排。 */
 const BAG_TWO_ROW_MIN = 5;
@@ -198,6 +209,10 @@ const UUID = {
     albumBadge: 'e3072f55-9340-4b85-ae10-2091d7f20067@f9941',
     albumBackBtn: '4b8c4d1f-8d8c-4c2e-a1d4-2b34d618b102@f9941',
     albumTitle: '119cb1fd-93cd-436b-b680-63f979d72451@f9941',
+    bulkModeTitle: '65d5d44a-c5c5-4d2f-9a0d-d4ed9d1fbd15@f9941',
+    bulkReplay: 'a8c31e70-5b24-4d9a-8f16-2c7b0e4d91aa@f9941',
+    bulkBasket: '7b362082-193c-4dcf-8347-838b6f00e319@f9941',
+    bulkCart: 'f0d7311a-0579-4659-9f83-167ef0ff3a25@f9941',
     homeSettings: '6d3c99ac-d73a-44bd-a6a9-543c9ee64001@f9941',
     btnStart: 'c2a1b3d4-e5f6-4789-8012-3f4a5b6c7d8e@f9941',
     builtin: '20835ba4-6145-4fbc-a58a-051ce700aa3e@f9941',
@@ -343,6 +358,10 @@ export class GameController extends Component {
     private albumBadge: SpriteFrame | null = null;
     private albumBackBtn: SpriteFrame | null = null;
     private albumTitle: SpriteFrame | null = null;
+    private bulkModeTitle: SpriteFrame | null = null;
+    private bulkReplay: SpriteFrame | null = null;
+    private bulkBasket: SpriteFrame | null = null;
+    private bulkCart: SpriteFrame | null = null;
     private homeSettings: SpriteFrame | null = null;
 
     private board: BoardState | null = null;
@@ -763,18 +782,19 @@ export class GameController extends Component {
         this.addSprite(home, 'Icon', this.iconHome, 88, 88, 0, 0, Color.WHITE);
         this.bindHudPress(home, () => this.closeBulkPurchaseLayer());
 
+        const levelY = hudY - BULK_LEVEL_Y_OFFSET;
         const titlePill = new Node('TitlePill');
         titlePill.layer = UI_2D;
-        titlePill.setPosition(0, hudY, 0);
-        titlePill.addComponent(UITransform).setContentSize(LEVEL_PILL_W, LEVEL_PILL_H);
+        titlePill.setPosition(0, levelY, 0);
+        titlePill.addComponent(UITransform).setContentSize(BULK_LEVEL_PILL_W, BULK_LEVEL_PILL_H);
         const titleG = titlePill.addComponent(Graphics);
-        const titleR = LEVEL_PILL_H / 2;
+        const titleR = BULK_LEVEL_PILL_H / 2;
         titleG.fillColor = MILK;
-        titleG.roundRect(-LEVEL_PILL_W / 2, -titleR, LEVEL_PILL_W, LEVEL_PILL_H, titleR);
+        titleG.roundRect(-BULK_LEVEL_PILL_W / 2, -titleR, BULK_LEVEL_PILL_W, BULK_LEVEL_PILL_H, titleR);
         titleG.fill();
-        titleG.lineWidth = 2;
+        titleG.lineWidth = 3;
         titleG.strokeColor = new Color(107, 74, 58, 64);
-        titleG.roundRect(-LEVEL_PILL_W / 2, -titleR, LEVEL_PILL_W, LEVEL_PILL_H, titleR);
+        titleG.roundRect(-BULK_LEVEL_PILL_W / 2, -titleR, BULK_LEVEL_PILL_W, BULK_LEVEL_PILL_H, titleR);
         titleG.stroke();
         topHeader.addChild(titlePill);
         const protoIndex = bulkPrototypeIndex(proto.run.id);
@@ -782,18 +802,40 @@ export class GameController extends Component {
             titlePill,
             'Label',
             `第 ${protoIndex + 1} 关`,
-            LEVEL_LABEL_FONT,
+            BULK_LEVEL_FONT,
             WALNUT,
-            LEVEL_PILL_W - 20,
-            LEVEL_LABEL_LINE,
+            BULK_LEVEL_PILL_W - 24,
+            BULK_LEVEL_LINE,
         );
         this.tuneLabel(titleLabel, true);
         const titleLb = titleLabel.getComponent(Label);
-        if (titleLb) titleLb.lineHeight = LEVEL_LABEL_LINE;
+        if (titleLb) titleLb.lineHeight = BULK_LEVEL_LINE;
 
-        const undo = this.addHudRoundBtn(topHeader, 'BtnUndo', 312, hudY);
-        this.addSprite(undo, 'Icon', this.iconUndo, 48, 48, 0, 0, WALNUT);
-        this.bindHudPress(undo, () => this.openBulkPurchaseLayer(proto.run.id, 0));
+        const replay = new Node('BtnReplay');
+        replay.layer = UI_2D;
+        replay.setPosition(312, hudY, 0);
+        replay.addComponent(UITransform).setContentSize(88, 88);
+        topHeader.addChild(replay);
+        this.addSprite(replay, 'Icon', this.bulkReplay, 88, 88, 0, 0, Color.WHITE);
+        if (!this.bulkReplay) {
+            const icon = replay.getChildByName('Icon');
+            if (icon) {
+                icon.active = false;
+                const blank = icon.getComponent(Sprite);
+                if (blank) blank.spriteFrame = null;
+            }
+            void this.loadSlot(this.bulkReplay, UUID.bulkReplay, (frame) => {
+                this.bulkReplay = frame;
+            }).then(() => {
+                const icon = replay.getChildByName('Icon');
+                const sprite = icon?.getComponent(Sprite);
+                if (icon && sprite && this.bulkReplay && replay.isValid) {
+                    sprite.spriteFrame = this.bulkReplay;
+                    icon.active = true;
+                }
+            });
+        }
+        this.bindHudPress(replay, () => this.openBulkPurchaseLayer(proto.run.id, 0));
 
         const board = new Node('FridgeZone');
         board.layer = UI_2D;
@@ -807,6 +849,7 @@ export class GameController extends Component {
         receiptZone.setPosition(BULK_RECEIPT_X, trayTop - BULK_RECEIPT_H / 2, 0);
         receiptZone.addComponent(UITransform).setContentSize(BULK_RECEIPT_W, BULK_RECEIPT_H);
         card.addChild(receiptZone);
+        this.placeBulkWallProps(card);
 
         const bagZone = new Node('BagZone');
         bagZone.layer = UI_2D;
@@ -825,6 +868,7 @@ export class GameController extends Component {
         footerZone.setPosition(0, BULK_FOOTER_Y, 0);
         footerZone.addComponent(UITransform).setContentSize(300, 52);
         card.addChild(footerZone);
+        this.placeBulkModeTitle(card, hudY);
 
         let trayTargetIndex: number | null = demo.activeTrays.findIndex((tray) => !!tray && !tray.sealed && tray.filled < tray.cap);
         if (trayTargetIndex < 0) trayTargetIndex = null;
@@ -1563,24 +1607,128 @@ export class GameController extends Component {
         if (tableFront) tableFront.setSiblingIndex(shell.children.length - 1);
     }
 
+    /** 餐盘后面的空墙：菜篮靠左、购物车靠右，压在购物袋下面，不接点击。 */
+    private placeBulkWallProps(card: Node): void {
+        const dim = new Color(255, 255, 255, 220);
+        this.placeBulkDimSprite(card, 'BulkBasket', this.bulkBasket, UUID.bulkBasket, (frame) => {
+            this.bulkBasket = frame;
+        }, () => this.bulkBasket, 100, 100, -136, -44, dim);
+        this.placeBulkDimSprite(card, 'BulkCart', this.bulkCart, UUID.bulkCart, (frame) => {
+            this.bulkCart = frame;
+        }, () => this.bulkCart, 96, 111, 248, -50, dim);
+    }
+
+    private placeBulkDimSprite(
+        parent: Node,
+        name: string,
+        frame: SpriteFrame | null,
+        uuid: string,
+        save: (frame: SpriteFrame) => void,
+        current: () => SpriteFrame | null,
+        w: number,
+        h: number,
+        x: number,
+        y: number,
+        color: Color,
+    ): void {
+        const node = this.addSprite(parent, name, frame, w, h, x, y, color);
+        const apply = (ready: SpriteFrame) => {
+            if (!node.isValid) return;
+            const sprite = node.getComponent(Sprite);
+            if (!sprite) return;
+            sprite.spriteFrame = ready;
+            node.active = true;
+        };
+        if (frame) {
+            apply(frame);
+            return;
+        }
+        node.active = false;
+        const sprite = node.getComponent(Sprite);
+        if (sprite) sprite.spriteFrame = null;
+        void this.loadSlot(frame, uuid, save).then(() => {
+            const ready = current();
+            if (ready) apply(ready);
+        });
+    }
+
+    /** 周末大采购标题图，顶栏上方 30，按 1.2 倍上屏。 */
+    private placeBulkModeTitle(card: Node, hudY: number): void {
+        const y = hudY + BULK_TITLE_LIFT;
+        const node = this.addSprite(
+            card,
+            'BulkModeTitle',
+            this.bulkModeTitle,
+            BULK_TITLE_W,
+            BULK_TITLE_H,
+            0,
+            y,
+            Color.WHITE,
+        );
+        const apply = (frame: SpriteFrame) => {
+            if (!node.isValid) return;
+            const sprite = node.getComponent(Sprite);
+            if (sprite) sprite.spriteFrame = frame;
+            node.active = true;
+        };
+        if (this.bulkModeTitle) {
+            apply(this.bulkModeTitle);
+            return;
+        }
+        node.active = false;
+        const sprite = node.getComponent(Sprite);
+        if (sprite) sprite.spriteFrame = null;
+        void this.loadSlot(this.bulkModeTitle, UUID.bulkModeTitle, (frame) => {
+            this.bulkModeTitle = frame;
+        }).then(() => {
+            if (this.bulkModeTitle) apply(this.bulkModeTitle);
+        });
+    }
+
     private buildBulkP5ReceiptDemo(parent: Node): Node {
         const receipt = new Node('ReceiptPanel');
         receipt.layer = UI_2D;
         receipt.setPosition(0, 0, 0);
         receipt.addComponent(UITransform).setContentSize(BULK_RECEIPT_W, BULK_RECEIPT_H);
-        this.ensureRoundedBg(receipt, 'Bg', BULK_RECEIPT_W, BULK_RECEIPT_H, 20, new Color(250, 252, 255, 255), new Color(122, 158, 176, 90));
+        const paper = new Color(255, 246, 232, 255);
+        const edge = new Color(176, 130, 96, 230);
+        const shadow = this.ensureRoundedBg(
+            receipt,
+            'PaperShadow',
+            BULK_RECEIPT_W,
+            BULK_RECEIPT_H,
+            18,
+            new Color(107, 74, 58, 42),
+            null,
+            0,
+            0,
+        );
+        shadow.setPosition(0, -4, 0);
+        shadow.setSiblingIndex(0);
+        const bg = this.ensureRoundedBg(receipt, 'Bg', BULK_RECEIPT_W, BULK_RECEIPT_H, 18, paper, edge, 2, 0);
+        bg.setSiblingIndex(1);
         parent.addChild(receipt);
         const title = this.addLabel(receipt, 'Title', '购物小票', 22, WALNUT, BULK_RECEIPT_W - 16, 30);
-        title.setPosition(0, BULK_RECEIPT_H / 2 - 28, 0);
+        title.setPosition(0, BULK_RECEIPT_H / 2 - 26, 0);
         this.tuneLabel(title, true);
         const rule = new Node('Rule');
         rule.layer = UI_2D;
         rule.setPosition(0, BULK_RECEIPT_H / 2 - 48, 0);
-        rule.addComponent(UITransform).setContentSize(100, 2);
+        rule.addComponent(UITransform).setContentSize(112, 4);
         const ruleG = rule.addComponent(Graphics);
-        ruleG.fillColor = new Color(176, 130, 96, 70);
-        ruleG.roundRect(-50, -1, 100, 2, 1);
-        ruleG.fill();
+        ruleG.strokeColor = new Color(176, 130, 96, 170);
+        ruleG.lineWidth = 2;
+        const dash = 7;
+        const dashGap = 5;
+        const ruleW = 112;
+        let dashX = -ruleW / 2;
+        while (dashX < ruleW / 2) {
+            const dashEnd = Math.min(dashX + dash, ruleW / 2);
+            ruleG.moveTo(dashX, 0);
+            ruleG.lineTo(dashEnd, 0);
+            ruleG.stroke();
+            dashX += dash + dashGap;
+        }
         receipt.addChild(rule);
         return receipt;
     }
@@ -1591,16 +1739,21 @@ export class GameController extends Component {
             if (child.name.startsWith('Row')) child.destroy();
         }
         const kinds = FOOD_IDS.filter((id) => (demo.stageDef.receipt[id] || 0) > 0);
-        for (let i = 0; i < kinds.length; i++) {
+        const rowCount = kinds.length;
+        const firstRowY = BULK_RECEIPT_H / 2 - 74;
+        const lastRowY = -BULK_RECEIPT_H / 2 + 24;
+        const rowPitch = rowCount <= 1 ? 0 : Math.min(40, (firstRowY - lastRowY) / (rowCount - 1));
+        const iconSize = Math.min(32, Math.max(22, Math.floor(rowPitch - 4)));
+        for (let i = 0; i < rowCount; i++) {
             const id = kinds[i];
             const row = new Node(`Row${i}`);
             row.layer = UI_2D;
-            row.setPosition(0, BULK_RECEIPT_H / 2 - 78 - i * 44, 0);
-            row.addComponent(UITransform).setContentSize(BULK_RECEIPT_W - 20, 36);
+            row.setPosition(0, firstRowY - i * rowPitch, 0);
+            row.addComponent(UITransform).setContentSize(BULK_RECEIPT_W - 20, iconSize + 4);
             receipt.addChild(row);
             const iconFrame = this.frameForBag(id) || this.frameForFood(id);
             if (iconFrame) {
-                const icon = this.addSprite(row, 'Icon', iconFrame, 32, 32, -30, 0, Color.WHITE);
+                const icon = this.addSprite(row, 'Icon', iconFrame, iconSize, iconSize, -30, 0, Color.WHITE);
                 icon.setScale(1, 1, 1);
             }
             const count = this.addLabel(row, 'Count', `x${demo.receiptRemaining[id] || 0}`, 24, WALNUT, 56, 28);
@@ -3487,6 +3640,10 @@ export class GameController extends Component {
             this.loadSlot(this.handPoint, UUID.handPoint, (frame) => { this.handPoint = frame; }),
             this.loadSlot(this.iconUndo, UUID.iconUndo, (frame) => { this.iconUndo = frame; }),
             this.loadSlot(this.iconHome, UUID.iconHome, (frame) => { this.iconHome = frame; }),
+            this.loadSlot(this.bulkModeTitle, UUID.bulkModeTitle, (frame) => { this.bulkModeTitle = frame; }),
+            this.loadSlot(this.bulkReplay, UUID.bulkReplay, (frame) => { this.bulkReplay = frame; }),
+            this.loadSlot(this.bulkBasket, UUID.bulkBasket, (frame) => { this.bulkBasket = frame; }),
+            this.loadSlot(this.bulkCart, UUID.bulkCart, (frame) => { this.bulkCart = frame; }),
         ]).then(() => undefined);
     }
 
@@ -3726,8 +3883,12 @@ export class GameController extends Component {
         this.bindHudPress(home, () => this.goHome());
 
         const showHint = !!(this.board && this.board.level.id >= 7);
-        const undo = this.addHudRoundBtn(parent, 'BtnUndo', showHint ? 216 : 312, y);
-        this.addSprite(undo, 'Icon', this.iconUndo, 48, 48, 0, 0, WALNUT);
+        const undo = new Node('BtnUndo');
+        undo.layer = UI_2D;
+        undo.setPosition(showHint ? 216 : 312, y, 0);
+        undo.addComponent(UITransform).setContentSize(88, 88);
+        parent.addChild(undo);
+        this.addSprite(undo, 'Icon', this.bulkReplay, 88, 88, 0, 0, Color.WHITE);
         this.bindHudPress(undo, () => this.restartLevel());
 
         if (showHint) {

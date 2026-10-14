@@ -25,6 +25,7 @@ import {
     Tween,
     tween,
 } from 'cc';
+import { EDITOR, PREVIEW } from 'cc/env';
 import { BoardState } from './game/BoardState';
 import { packTrayGrid, TRAY_GAP, TRAY_WALL_H, TRAY_WALL_TOP, TRAY_WALL_W } from './game/levelLayout';
 import { albumStatusLine, noteAlbumWin, prepareAlbum, visibleAlbumGrade, winStepLine } from './game/AlbumState';
@@ -247,6 +248,12 @@ const LEVEL_PILL_W = 252;
 const LEVEL_PILL_H = 72;
 const LEVEL_LABEL_FONT = 36;
 const LEVEL_LABEL_LINE = 46;
+/** 关卡顶栏下缘与冰箱墙面/木框顶之间的最小空隙（设计像素）。 */
+const GAP_HUD_ABOVE_FRIDGE = 28;
+/** 对局 HUD 行中心到最下缘：与回主页 88×88 一致（≥关卡胶囊半高）。 */
+const HUD_ROW_EXTENT_BELOW = 44;
+/** UI §4：呼吸灯在木框外再扩 12px。 */
+const FRIDGE_GLOW_OUTSET = 12;
 
 type FoodDragSource = { kind: 'bag'; col: number } | { kind: 'buffer'; index: number };
 
@@ -447,23 +454,24 @@ export class GameController extends Component {
 
     /** 预览控制台：gm(24) 之后点「开始收拾」进第 24 关。gm(0) 取消。 */
     private bindGm() {
+        const devLog = PREVIEW || EDITOR;
         const host = globalThis as { gm?: (level?: number) => void };
         host.gm = (level?: number) => {
             if (level == null || Number(level) === 0) {
                 this.gmLevelId = null;
-                console.log('[fridge] gm 已取消，开始收拾按通关进度进关');
+                if (devLog) console.log('[fridge] gm 已取消，开始收拾按通关进度进关');
                 return;
             }
             const id = Math.floor(Number(level));
             const found = this.levelById(id);
             if (!found) {
-                console.log(`[fridge] 没有第 ${level} 关`);
+                if (devLog) console.log(`[fridge] 没有第 ${level} 关`);
                 return;
             }
             this.gmLevelId = id;
-            console.log(`[fridge] 已指定第 ${id} 关，点开始收拾进入`);
+            if (devLog) console.log(`[fridge] 已指定第 ${id} 关，点开始收拾进入`);
         };
-        console.log('[fridge] 调关：gm(24)，再点开始收拾');
+        if (devLog) console.log('[fridge] 调关：gm(24)，再点开始收拾');
     }
 
     private bindHome() {
@@ -3929,13 +3937,43 @@ export class GameController extends Component {
         }
     }
 
+    /** 当前关卡冰箱格阵的最上沿（Cocos y，向上为正）。 */
+    private fridgeTrayTopY(board: BoardState): number {
+        const metrics = this.trayLayout(board);
+        let top = -Infinity;
+        for (let i = 0; i < metrics.length; i++) {
+            const m = metrics[i];
+            top = Math.max(top, m.y + m.outerH / 2);
+        }
+        return Number.isFinite(top) ? top : this.screenToCocosY(TRAY_WALL_TOP);
+    }
+
+    /** 顶栏不得压到的 playfield 上沿：墙面顶、格阵顶、呼吸外晕。 */
+    private playfieldClearTopY(board: BoardState): number {
+        const wallTop = this.screenToCocosY(TRAY_WALL_TOP);
+        const trayTop = this.fridgeTrayTopY(board);
+        return Math.max(wallTop, trayTop) + FRIDGE_GLOW_OUTSET;
+    }
+
     /** 微信刘海和右上角胶囊以下。编辑器里按顶栏 96px。只动 HUD。 */
     private hudY(): number {
         const canvasUi = this.node.getComponent(UITransform);
         const canvasH = canvasUi && canvasUi.height > 0 ? canvasUi.height : visibleDesignSize().height;
         const top = canvasH / 2;
         const inset = this.wechatTopInset();
-        return top - inset - 8 - 44;
+        const pillHalf = LEVEL_PILL_H / 2;
+        const extentBelow = HUD_ROW_EXTENT_BELOW;
+        let y = top - inset - 8 - extentBelow;
+        const board = this.board;
+        let minY = -Infinity;
+        if (board) {
+            minY = this.playfieldClearTopY(board) + GAP_HUD_ABOVE_FRIDGE + extentBelow;
+            y = Math.max(y, minY);
+        }
+        const maxY = top - inset - 8 - pillHalf;
+        if (y > maxY && maxY >= minY) y = maxY;
+        else if (board && y < minY) y = minY;
+        return y;
     }
 
     private wechatTopInset(): number {
@@ -4176,9 +4214,10 @@ export class GameController extends Component {
         return board.trays.some((t) => t.cap !== cap0);
     }
 
-    /** 屏幕左上 y → Cocos 中心原点。 */
+    /** 屏幕左上 y → Cocos 中心原点（随可见设计高度，与 hudY 同一套顶边）。 */
     private screenToCocosY(screenY: number): number {
-        return DESIGN_H / 2 - screenY;
+        const canvasH = this.canvasSize().h;
+        return canvasH / 2 - screenY;
     }
 
     /** 短边 2P、长边 cap×P，整组居中铺进墙面。横格是竖格转 90 度。 */

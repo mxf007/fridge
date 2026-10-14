@@ -47,6 +47,26 @@ const FAIL_Y = BOARD_TOP - 75;
 const DROP_Y = BOARD_TOP + 40;
 const WALL = 24;
 const BEST_KEY = 'fridge_merge_best_score';
+/** HUD 行中心到各控件下缘（设计像素），用于和框顶 clamp。 */
+const HOME_BTN_EXTENT_BELOW = 44;
+const SCORE_SHELF_EXTENT_BELOW = 42;
+/** 侧栏「下一个」：图标尺寸与 build / refresh 共用，避免加载图后放大重叠。 */
+const NEXT_PREVIEW_ICON = 56;
+/** 胶囊与图标之间的竖向空隙。 */
+const NEXT_STACK_GAP = 12;
+const NEXT_PLATE_HALF = 15;
+const NEXT_ICON_HALF = NEXT_PREVIEW_ICON / 2;
+const NEXT_ICON_Y = 0;
+const NEXT_CAPTION_Y = NEXT_ICON_HALF + NEXT_STACK_GAP + NEXT_PLATE_HALF;
+const NEXT_NAME_Y = -(NEXT_ICON_HALF + NEXT_STACK_GAP + NEXT_PLATE_HALF);
+const NEXT_TOKEN_EXTENT_BELOW = -NEXT_NAME_Y + NEXT_PLATE_HALF;
+/** 侧栏「下一个」布局总高（顶胶囊上沿 → 底胶囊下沿）。 */
+const NEXT_TOKEN_H = 2 * (NEXT_ICON_HALF + NEXT_STACK_GAP + NEXT_PLATE_HALF) + NEXT_PREVIEW_ICON;
+/** 投放线在框顶之上约 40px；HUD 下缘再留空。 */
+const HUD_CLEAR_ABOVE_DROP = 48;
+const SCORE_SHELF_ABOVE = 40;
+const SCORE_TAG_GAP = 20;
+const TITLE_TAG_GAP = 12;
 
 const CREAM = new Color(246, 239, 230, 255);
 const WALNUT = new Color(107, 74, 58, 255);
@@ -268,25 +288,19 @@ export class MergeGameController extends Component {
         const nextToken = new Node('NextToken');
         nextToken.layer = UI_2D;
         nextToken.setPosition(274, 0);
-        nextToken.addComponent(UITransform).setContentSize(112, 132);
+        nextToken.addComponent(UITransform).setContentSize(112, NEXT_TOKEN_H);
         this.node.addChild(nextToken);
         const captionPlate = new Node('CaptionPlate');
         captionPlate.layer = UI_2D;
-        captionPlate.setPosition(0, 58);
+        captionPlate.setPosition(0, NEXT_CAPTION_Y);
         captionPlate.addComponent(UITransform).setContentSize(84, 30);
         const plate = captionPlate.addComponent(Graphics);
         plate.fillColor = new Color(255, 253, 248, 235);
         plate.roundRect(-42, -15, 84, 30, 15);
         plate.fill();
-        nextToken.addChild(captionPlate);
         const caption = this.addLabel(captionPlate, 'Caption', '下一个', 16, WALNUT, 76, 24, 0, 0);
         const captionLabel = caption.getComponent(Label);
         if (captionLabel) captionLabel.isBold = true;
-        this.nextIcon = new Node('NextIcon');
-        this.nextIcon.layer = UI_2D;
-        this.nextIcon.addComponent(UITransform).setContentSize(80, 80);
-        this.nextIcon.addComponent(Sprite).sizeMode = Sprite.SizeMode.CUSTOM;
-        nextToken.addChild(this.nextIcon);
         const nextNamePlate = this.roundRectNode(
             'NextNamePlate',
             88,
@@ -296,10 +310,18 @@ export class MergeGameController extends Component {
             new Color(176, 130, 96, 120),
             2,
         );
-        nextNamePlate.setPosition(0, -54);
+        nextNamePlate.setPosition(0, NEXT_NAME_Y);
+        this.nextIcon = new Node('NextIcon');
+        this.nextIcon.layer = UI_2D;
+        this.nextIcon.setPosition(0, NEXT_ICON_Y);
+        this.nextIcon.addComponent(UITransform).setContentSize(NEXT_PREVIEW_ICON, NEXT_PREVIEW_ICON);
+        this.nextIcon.addComponent(Sprite).sizeMode = Sprite.SizeMode.CUSTOM;
         nextToken.addChild(nextNamePlate);
-        nextNamePlate.setSiblingIndex(0);
-        this.nextLabel = this.addLabel(nextToken, 'Next', '', 18, WALNUT, 96, 24, 0, -54).getComponent(Label);
+        nextToken.addChild(this.nextIcon);
+        nextToken.addChild(captionPlate);
+        const nextLabelNode = this.addLabel(nextToken, 'Next', '', 18, WALNUT, 96, 24, 0, NEXT_NAME_Y);
+        this.nextLabel = nextLabelNode.getComponent(Label);
+        nextLabelNode.setSiblingIndex(nextToken.children.length - 1);
 
         const taglinePlate = this.roundRectNode(
             'TaglinePlate',
@@ -335,16 +357,14 @@ export class MergeGameController extends Component {
             this.closeMerge();
         }, this);
         this.node.addChild(close);
-        this.layoutHeader();
 
         this.board = new Node('Board');
         this.board.layer = UI_2D;
         this.board.addComponent(UITransform).setContentSize(BOARD_W, BOARD_H);
-        const screenBottom = -this.screenH / 2;
-        const lift = Math.max(0, screenBottom + 24 - BOARD_BOTTOM);
-        this.board.setPosition(0, BOARD_BOTTOM + BOARD_H / 2 + lift);
         this.node.addChild(this.board);
         this.paintBoard();
+        this.positionBoard();
+        this.layoutHeader();
         const views = new Node('FruitViews');
         views.layer = UI_2D;
         views.addComponent(UITransform).setContentSize(DESIGN_W, DESIGN_H);
@@ -380,9 +400,8 @@ export class MergeGameController extends Component {
         const title = this.titleArt?.node;
         const titleLabel = this.node.getChildByName('Title');
         if (title && titleLabel) titleLabel.setPosition(title.position);
-        const boardMark = hud.getChildByName('Board');
-        if (boardMark && this.board) this.board.setPosition(boardMark.position);
         hud.destroy();
+        this.positionBoard();
         this.layoutHeader();
     }
 
@@ -505,7 +524,7 @@ export class MergeGameController extends Component {
             sprite.sizeMode = Sprite.SizeMode.CUSTOM;
             sprite.color = Color.WHITE;
             sprite.spriteFrame = frame;
-            icon.getComponent(UITransform)?.setContentSize(80, 80);
+            icon.getComponent(UITransform)?.setContentSize(NEXT_PREVIEW_ICON, NEXT_PREVIEW_ICON);
             sprite.enabled = true;
             return;
         }
@@ -515,7 +534,7 @@ export class MergeGameController extends Component {
         g.enabled = true;
         g.clear();
         g.fillColor = spec.color;
-        g.circle(0, 0, 24);
+        g.circle(0, 0, NEXT_PREVIEW_ICON / 2 - 2);
         g.fill();
     }
 
@@ -786,26 +805,62 @@ export class MergeGameController extends Component {
         this.layoutHeader();
     }
 
-    /** 标题原比例，副标题贴在下面，返回按钮与分数同一行。 */
+    /** 矮屏时框整体上移，不被底边裁切。 */
+    private positionBoard(): void {
+        if (!this.board?.isValid) return;
+        this.measureScreen();
+        const screenBottom = -this.screenH / 2;
+        const lift = Math.max(0, screenBottom + 24 - BOARD_BOTTOM);
+        this.board.setPosition(0, BOARD_BOTTOM + BOARD_H / 2 + lift, 0);
+    }
+
+    /** 框顶为锚：分数行 → 副标题 → 标题，避免只抬分数条压进副标题。 */
     private layoutHeader(): void {
-        const top = this.screenH / 2 - this.topInset() - 36;
+        this.positionBoard();
         const titleNode = this.titleArt?.node;
         const titleUi = titleNode?.getComponent(UITransform);
         const titleH = titleUi?.height || 120;
-        const titleY = top - titleH / 2;
-        titleNode?.setPosition(0, titleY, 0);
-        this.node.getChildByName('Title')?.setPosition(0, titleY, 0);
-
         const tagPlate = this.taglinePlate;
         const tagH = tagPlate?.getComponent(UITransform)?.height || 42;
-        const tagY = titleY - titleH / 2 - 12 - tagH / 2;
+
+        const boardTop = this.boardTopY();
+        const extentBelow = this.hudExtentBelowScoreCenter();
+        let scoreY = boardTop + HUD_CLEAR_ABOVE_DROP + extentBelow;
+        let tagY = scoreY + SCORE_SHELF_ABOVE + SCORE_TAG_GAP + tagH / 2;
+        let titleY = tagY + tagH / 2 + TITLE_TAG_GAP + titleH / 2;
+
+        const titleTopLimit = this.screenH / 2 - this.topInset() - 36;
+        const titleTop = titleY + titleH / 2;
+        if (titleTop > titleTopLimit) {
+            const shift = titleTop - titleTopLimit;
+            titleY -= shift;
+            tagY -= shift;
+            scoreY -= shift;
+        }
+        const minScoreY = boardTop + HUD_CLEAR_ABOVE_DROP + extentBelow;
+        if (scoreY < minScoreY) {
+            scoreY = minScoreY;
+            tagY = scoreY + SCORE_SHELF_ABOVE + SCORE_TAG_GAP + tagH / 2;
+            titleY = tagY + tagH / 2 + TITLE_TAG_GAP + titleH / 2;
+        }
+
+        titleNode?.setPosition(0, titleY, 0);
+        this.node.getChildByName('Title')?.setPosition(0, titleY, 0);
         tagPlate?.setPosition(0, tagY, 0);
 
-        const scoreY = tagY - tagH / 2 - 22 - 39;
         this.node.getChildByName('ScoreShelf')?.setPosition(-10, scoreY, 0);
         this.node.getChildByName('NextToken')?.setPosition(274, scoreY, 0);
         this.node.getChildByName('BtnClose')?.setPosition(-304, scoreY, 0);
         this.liftFruitLayerAboveHud();
+    }
+
+    private boardTopY(): number {
+        if (!this.board?.isValid) return BOARD_BOTTOM + BOARD_H;
+        return this.board.position.y + BOARD_H / 2;
+    }
+
+    private hudExtentBelowScoreCenter(): number {
+        return Math.max(HOME_BTN_EXTENT_BELOW, SCORE_SHELF_EXTENT_BELOW, NEXT_TOKEN_EXTENT_BELOW);
     }
 
     /** 水果 Sprite 在 FruitViews，不在刚体节点上；该层必须盖在 ScoreShelf 之上，否则待投放水果会被分数条挡住。 */

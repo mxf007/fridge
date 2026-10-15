@@ -1,5 +1,6 @@
 import {
     _decorator,
+    assetManager,
     BoxCollider2D,
     Button,
     CircleCollider2D,
@@ -39,6 +40,7 @@ const UI_2D = Layers.Enum.UI_2D;
 
 const DESIGN_W = 720;
 const DESIGN_H = 1280;
+const REPLAY_BTN_UUID = 'a8c31e70-5b24-4d9a-8f16-2c7b0e4d91aa@f9941';
 const BOARD_W = 620;
 const BOARD_H = 850;
 const BOARD_BOTTOM = -500;
@@ -125,6 +127,7 @@ export class MergeGameController extends Component {
     /** 水果图片层。和刚体分开，避免物理节点上的 Sprite 不绘制。 */
     private fruitLayer: Node | null = null;
     private homeBtnSprite: Sprite | null = null;
+    private replayBtnSprite: Sprite | null = null;
 
     open(onClose: () => void): void {
         this.closeCallback = onClose;
@@ -357,6 +360,40 @@ export class MergeGameController extends Component {
             this.closeMerge();
         }, this);
         this.node.addChild(close);
+
+        const replay = new Node('BtnReplay');
+        replay.layer = UI_2D;
+        replay.setPosition(-304, 0);
+        replay.addComponent(UITransform).setContentSize(88, 88);
+        const replayBg = replay.addComponent(Graphics);
+        replayBg.fillColor = new Color(255, 253, 248, 232);
+        replayBg.circle(0, 0, 40);
+        replayBg.fill();
+        replayBg.lineWidth = 2;
+        replayBg.strokeColor = new Color(176, 130, 96, 96);
+        replayBg.circle(0, 0, 40);
+        replayBg.stroke();
+        const replayIcon = new Node('Icon');
+        replayIcon.layer = UI_2D;
+        replayIcon.addComponent(UITransform).setContentSize(88, 88);
+        replay.addChild(replayIcon);
+        const replaySpr = replayIcon.addComponent(Sprite);
+        replaySpr.sizeMode = Sprite.SizeMode.CUSTOM;
+        replaySpr.color = Color.WHITE;
+        this.replayBtnSprite = replaySpr;
+        replay.on(Node.EventType.TOUCH_START, () => {
+            tween(replay).to(0.08, { scale: new Vec3(0.97, 0.97, 1) }).start();
+        }, this);
+        replay.on(Node.EventType.TOUCH_CANCEL, () => {
+            tween(replay).to(0.08, { scale: new Vec3(1, 1, 1) }).start();
+        }, this);
+        replay.on(Node.EventType.TOUCH_END, (event: EventTouch) => {
+            event.propagationStopped = true;
+            tween(replay).to(0.08, { scale: new Vec3(1, 1, 1) }).start();
+            playMergeSfx('click');
+            this.openReplayConfirm();
+        }, this);
+        this.node.addChild(replay);
 
         this.board = new Node('Board');
         this.board.layer = UI_2D;
@@ -739,6 +776,7 @@ export class MergeGameController extends Component {
                 if (name === 'merge_title') titleFrame = frame;
                 if (name === 'btn_zhuye') this.applyHomeBtn(frame);
             }
+            this.loadReplayBtn();
             if (this.board) {
                 for (const child of this.board.children) {
                     const ball = child.getComponent(MergeBall);
@@ -773,6 +811,21 @@ export class MergeGameController extends Component {
     private applyHomeBtn(frame: SpriteFrame): void {
         if (!this.homeBtnSprite?.isValid) return;
         this.homeBtnSprite.spriteFrame = frame;
+    }
+
+    private loadReplayBtn(): void {
+        assetManager.loadAny(REPLAY_BTN_UUID, (error, asset) => {
+            if (error || !this.node?.isValid || !(asset instanceof SpriteFrame)) {
+                if (error) console.warn('[merge] load replay button failed', error);
+                return;
+            }
+            this.applyReplayBtn(asset);
+        });
+    }
+
+    private applyReplayBtn(frame: SpriteFrame): void {
+        if (!this.replayBtnSprite?.isValid) return;
+        this.replayBtnSprite.spriteFrame = frame;
     }
 
     private applyBackground(frame: SpriteFrame): void {
@@ -850,7 +903,8 @@ export class MergeGameController extends Component {
 
         this.node.getChildByName('ScoreShelf')?.setPosition(-10, scoreY, 0);
         this.node.getChildByName('NextToken')?.setPosition(274, scoreY, 0);
-        this.node.getChildByName('BtnClose')?.setPosition(-304, scoreY, 0);
+        this.node.getChildByName('BtnReplay')?.setPosition(-304, scoreY + 50, 0);
+        this.node.getChildByName('BtnClose')?.setPosition(-304, scoreY - 54, 0);
         this.liftFruitLayerAboveHud();
     }
 
@@ -1015,6 +1069,64 @@ export class MergeGameController extends Component {
         panel.addChild(shareBtn);
 
         this.scheduleOnce(() => prefetchShareScreenshot(), 0.2);
+    }
+
+    private openReplayConfirm(): void {
+        if (!this.node?.isValid) return;
+        if (this.node.getChildByName('ReplayConfirm')) return;
+        const physics = PhysicsSystem2D.instance;
+        const wasPhysicsEnabled = physics.enable;
+        const wasInputLocked = this.inputLocked;
+        this.inputLocked = true;
+        physics.enable = false;
+
+        const layer = new Node('ReplayConfirm');
+        layer.layer = UI_2D;
+        layer.addComponent(UITransform).setContentSize(this.screenW, this.screenH);
+        const dim = layer.addComponent(Graphics);
+        dim.fillColor = new Color(48, 48, 48, 160);
+        dim.rect(-this.screenW / 2, -this.screenH / 2, this.screenW, this.screenH);
+        dim.fill();
+        this.node.addChild(layer);
+
+        const card = this.roundRectNode('Card', 520, 300, CREAM, 32, FRAME, 4);
+        card.setPosition(0, 30, 0);
+        layer.addChild(card);
+        this.addLabel(card, 'Title', '是否重新挑战关卡', 34, WALNUT, 420, 44, 0, 54);
+        this.addLabel(card, 'Sub', '确定后会重新开始本局', 22, FRAME, 420, 30, 0, 8);
+
+        const restore = () => {
+            physics.enable = wasPhysicsEnabled;
+            this.inputLocked = wasInputLocked;
+        };
+        const close = () => {
+            restore();
+            if (layer.isValid) layer.destroy();
+        };
+
+        const cancel = this.roundRectNode('BtnCancel', 200, 68, new Color(140, 132, 124, 255), 26, new Color(107, 74, 58, 96), 2);
+        cancel.setPosition(-120, -78, 0);
+        cancel.addComponent(Button);
+        this.addLabel(cancel, 'Label', '取消', 28, MILK, 140, 34, 0, 0);
+        cancel.on(Node.EventType.TOUCH_END, (event: EventTouch) => {
+            event.propagationStopped = true;
+            playMergeSfx('click');
+            close();
+        }, this);
+        card.addChild(cancel);
+
+        const confirm = this.roundRectNode('BtnConfirm', 200, 68, CORAL, 26, new Color(184, 87, 67, 255), 3);
+        confirm.setPosition(120, -78, 0);
+        confirm.addComponent(Button);
+        this.addLabel(confirm, 'Label', '确定', 28, MILK, 140, 34, 0, 0);
+        confirm.on(Node.EventType.TOUCH_END, (event: EventTouch) => {
+            event.propagationStopped = true;
+            playMergeSfx('click');
+            restore();
+            if (layer.isValid) layer.destroy();
+            this.startRound();
+        }, this);
+        card.addChild(confirm);
     }
 
     private updateScore(): void {

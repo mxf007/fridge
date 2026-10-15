@@ -14,6 +14,7 @@ import { FOOD_IDS } from './types';
 
 export const CLOUD_COLLECTION = 'saves';
 export const CLEARED_KEY = 'fridge_cleared';
+export const BULK_RUN_ID_KEY = 'bulk_weekend_run_id';
 export const MILESTONE_NS = [10, 20, 30] as const;
 const DOC_ID_KEY = 'fridge_cloud_doc_id';
 
@@ -22,6 +23,7 @@ export type MilestoneFlags = Record<MilestoneN, boolean>;
 
 export type ProgressFile = {
     cleared: number;
+    bulkRunId: string;
     album: AlbumFile;
     milestones: MilestoneFlags;
 };
@@ -70,6 +72,7 @@ export function milestoneKey(n: number): string {
 export function emptyProgress(): ProgressFile {
     return {
         cleared: 0,
+        bulkRunId: '',
         album: { entries: {} },
         milestones: { 10: false, 20: false, 30: false },
     };
@@ -79,16 +82,18 @@ export function readProgress(kv: AlbumKv): ProgressFile {
     const raw = kv.getItem(CLEARED_KEY);
     const parsed = raw ? parseInt(raw, 10) : 0;
     const cleared = parsed > 0 ? Math.min(200, parsed) : 0;
+    const bulkRunId = sanitizeBulkRunId(kv.getItem(BULK_RUN_ID_KEY) || '');
     const milestones = emptyProgress().milestones;
     for (let i = 0; i < MILESTONE_NS.length; i++) {
         const n = MILESTONE_NS[i];
         milestones[n] = kv.getItem(milestoneKey(n)) === '1';
     }
-    return { cleared, album: readAlbum(kv), milestones };
+    return { cleared, bulkRunId, album: readAlbum(kv), milestones };
 }
 
 export function writeProgress(kv: AlbumKv, file: ProgressFile): void {
     kv.setItem(CLEARED_KEY, file.cleared > 0 ? String(file.cleared) : '0');
+    kv.setItem(BULK_RUN_ID_KEY, sanitizeBulkRunId(file.bulkRunId));
     writeAlbum(kv, file.album);
     for (let i = 0; i < MILESTONE_NS.length; i++) {
         const n = MILESTONE_NS[i];
@@ -102,6 +107,7 @@ export function progressFromCloud(data: unknown): ProgressFile | null {
     const src = data as Record<string, unknown>;
     return {
         cleared: clampCleared(src.cleared),
+        bulkRunId: sanitizeBulkRunId(src.bulkRunId),
         album: albumFromCloud(src.album),
         milestones: flagsFromCloud(src.milestones),
     };
@@ -127,6 +133,7 @@ export function mergeProgress(local: ProgressFile, remote: ProgressFile): Progre
     }
     return {
         cleared: Math.max(local.cleared, remote.cleared),
+        bulkRunId: mergeBulkRunId(local.bulkRunId, remote.bulkRunId),
         album: { entries },
         milestones: {
             10: local.milestones[10] || remote.milestones[10],
@@ -150,6 +157,7 @@ export function canonProgress(file: ProgressFile): string {
     }
     return JSON.stringify({
         cleared: file.cleared,
+        bulkRunId: sanitizeBulkRunId(file.bulkRunId),
         milestones: {
             10: !!file.milestones[10],
             20: !!file.milestones[20],
@@ -271,6 +279,7 @@ function cloudBody(file: ProgressFile): Record<string, unknown> {
     return {
         v: 1,
         cleared: file.cleared,
+        bulkRunId: sanitizeBulkRunId(file.bulkRunId),
         milestones: {
             '10': !!file.milestones[10],
             '20': !!file.milestones[20],
@@ -391,6 +400,22 @@ function clampCleared(value: unknown): number {
     const n = typeof value === 'number' ? value : typeof value === 'string' ? parseInt(value, 10) : NaN;
     if (!Number.isFinite(n) || n <= 0) return 0;
     return Math.min(200, Math.floor(n));
+}
+
+function sanitizeBulkRunId(value: unknown): string {
+    return typeof value === 'string' && /^bulk_\d{2,3}$/.test(value) ? value : '';
+}
+
+function bulkRunRank(runId: string): number {
+    if (!runId) return 0;
+    const parsed = parseInt(runId.replace(/^bulk_/, ''), 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+}
+
+function mergeBulkRunId(local: string, remote: string): string {
+    const a = sanitizeBulkRunId(local);
+    const b = sanitizeBulkRunId(remote);
+    return bulkRunRank(a) >= bulkRunRank(b) ? a : b;
 }
 
 function flagsFromCloud(raw: unknown): MilestoneFlags {

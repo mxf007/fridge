@@ -1,18 +1,22 @@
 import { FOOD_IDS, type FoodId } from '../game/types';
-import { assertBulkStageDef, type BulkRunDef, type BulkStageDef } from './types';
+import { assertBulkStageDef, cloneBags, type BulkRunDef, type BulkStageDef } from './types';
 
-/** 文档推荐池，补上正文示例里反复出现的 8。 */
-export const BULK_TRAY_CAP_POOL = [8, 10, 12, 14, 16, 18, 20] as const;
+/** 连点节奏用的容量。单格太大时，封格太慢。 */
+export const BULK_TRAY_CAP_POOL = [6, 8, 10, 12] as const;
 
 export type BulkLevelStageConfig = {
     id: string;
     title: string;
-    /** 从左到右。前 4 个先上场，剩下的是补位队列。 */
+    /** 从左到右。前 openTrays 个先上场，剩下的是补位队列。 */
     caps: number[];
     queuePreview: number;
     counts: Partial<Record<FoodId, number>>;
     /** 每列层数。各项之和必须等于 caps 之和，也必须等于 counts 之和。 */
     columns: number[];
+    /** 铺袋顺序。数组前面的食物在栈顶，按这个顺序收完能过关。 */
+    order: FoodId[];
+    /** 个别教学关手工铺袋，避免开局所有列顶层都是同一种。 */
+    presetBags?: FoodId[][];
     /** 谁该进哪一格。玩家仍自己分配，这行只给复盘。 */
     plan: string;
 };
@@ -23,451 +27,369 @@ export type BulkLevelConfig = {
     unlockCleared: number;
     counterSlots: number;
     bufferStackCap: number;
+    /** 同时上台的冰箱格。 */
+    openTrays: number;
     goal: string;
-    /** 三趟分钟带相加后的整局验收区间。 */
+    /** 单关连点大约半分钟到一分多钟。 */
     targetMinutes: [number, number];
     expectedReplayLine: string;
     stages: BulkLevelStageConfig[];
 };
 
-const COLS6 = [8, 8, 8, 8, 8, 8];
-const COLS7 = [8, 8, 8, 8, 8, 8, 8];
-const COLS8 = [8, 8, 8, 8, 8, 8, 8, 8];
+type BulkLevelSpec = {
+    title: string;
+    goal: string;
+    replay: string;
+    openTrays: number;
+    preview: number;
+    caps: number[];
+    counts: Partial<Record<FoodId, number>>;
+    order: FoodId[];
+    presetBags?: FoodId[][];
+    plan: string;
+};
 
-/**
- * 加关：在这张表末尾追加一项。
- * 表本身只是静态配置。铺袋子、校验在 loadBulkLevel() 里做，进那一关再调。
- */
-export const BULK_LEVEL_CONFIGS: BulkLevelConfig[] = [
-    {
-        id: 'bulk_01',
-        title: '看小票，别把小件送进大格',
+function columnDepths(total: number, columns = 6): number[] {
+    const base = Math.floor(total / columns);
+    const extra = total % columns;
+    const depths: number[] = [];
+    for (let i = 0; i < columns; i++) depths.push(base + (i < extra ? 1 : 0));
+    return depths;
+}
+
+function buildBulkLevel(index: number, spec: BulkLevelSpec): BulkLevelConfig {
+    const capSum = spec.caps.reduce((sum, cap) => sum + cap, 0);
+    const id = `bulk_${index < 9 ? '0' : ''}${index + 1}`;
+    return {
+        id,
+        title: spec.title,
         unlockCleared: 0,
         counterSlots: 3,
         bufferStackCap: 4,
-        goal: '大容量格和补位。主难点只有大格诱惑。',
-        targetMinutes: [3.9, 6.5],
-        expectedReplayLine: '我把 8 件苹果锁进 12 格了',
+        openTrays: spec.openTrays,
+        goal: spec.goal,
+        targetMinutes: [0.5, 0.9],
+        expectedReplayLine: spec.replay,
         stages: [
             {
                 id: 'A',
-                title: '第一趟到家',
-                caps: [12, 8, 10, 10, 8],
-                queuePreview: 1,
-                counts: { meat: 12, fruit: 8, veg: 10, milk: 18 },
-                columns: COLS6,
-                plan: '肉 12，苹果 8，青菜 10，牛奶 18 = 10+8。牛奶锁进 12 会剩 6。',
-            },
-            {
-                id: 'B',
-                title: '第二趟补货',
-                caps: [14, 10, 8, 8, 8],
-                queuePreview: 2,
-                counts: { meat: 14, veg: 10, fruit: 8, milk: 16 },
-                columns: COLS6,
-                plan: '肉 14，青菜 10，苹果 8，牛奶 16 = 8+8。10 或 8 锁进 14 都凑不满。',
-            },
-            {
-                id: 'C',
-                title: '冷藏室塞满',
-                caps: [12, 8, 8, 8, 10, 10],
-                queuePreview: 2,
-                counts: { meat: 12, fruit: 8, veg: 16, milk: 20 },
-                columns: COLS7,
-                plan: '肉 12，苹果 8，青菜 16 = 8+8，牛奶 20 = 10+10。牛奶若拿 12+8，苹果和两只 10 对不上。',
+                title: spec.title,
+                caps: spec.caps,
+                queuePreview: spec.preview,
+                counts: spec.counts,
+                columns: columnDepths(capSum),
+                order: spec.order,
+                presetBags: spec.presetBags ? cloneBags(spec.presetBags) : undefined,
+                plan: spec.plan,
             },
         ],
+    };
+}
+
+const SIX = [6, 6, 6, 6, 6, 6];
+
+/**
+ * 一关一袋。点食物会锁最左边的空格，所以大格放在最左，件数对得上的食物要先点。
+ * 1–8 关 4 格、预告 1 张；9–16 关 4 格、预告 2 张、5 种；17–24 关 5 格、预告 2 张。
+ */
+const BULK_LEVEL_SPECS: BulkLevelSpec[] = [
+    {
+        title: '左边那只留给肉',
+        goal: '最左边是 8。先把 8 件肉点进去，再收后面的 6。',
+        replay: '我先点了 6 件的食物，左边那只 8 装不满',
+        openTrays: 4,
+        preview: 1,
+        caps: [8, 6, 6, 6, 6],
+        counts: { meat: 8, fruit: 6, veg: 6, milk: 12 },
+        order: ['meat', 'fruit', 'veg', 'milk'],
+        presetBags: [
+            ['milk', 'veg', 'milk', 'fruit', 'milk', 'meat'],
+            ['milk', 'meat', 'milk', 'veg', 'meat', 'fruit'],
+            ['milk', 'fruit', 'milk', 'meat', 'veg'],
+            ['meat', 'milk', 'veg', 'fruit', 'milk'],
+            ['milk', 'veg', 'fruit', 'milk', 'meat'],
+            ['meat', 'milk', 'veg', 'meat', 'fruit'],
+        ],
+        plan: '肉 8 对最左。水果 6 接补进来的 6。青菜 6。牛奶 12 吃右边两只 6。',
     },
     {
-        id: 'bulk_02',
-        title: '两样小件数抢同一只小格',
-        unlockCleared: 0,
-        counterSlots: 3,
-        bufferStackCap: 5,
-        goal: '第二趟让牛奶的 16 和四份 8 件抢 8 格。',
-        targetMinutes: [3.9, 6.5],
-        expectedReplayLine: '我把牛奶拆进两只 8 格，小票上那四样没地方去了',
-        stages: [
-            {
-                id: 'A',
-                title: '第一趟到家',
-                caps: [12, 12, 8, 8, 8],
-                queuePreview: 1,
-                counts: { meat: 12, milk: 12, veg: 8, fruit: 16 },
-                columns: COLS6,
-                plan: '肉 12，牛奶 12，青菜 8，苹果 16 = 8+8。两只 12 对调仍可解。苹果锁进 12 会剩 4。',
-            },
-            {
-                id: 'B',
-                title: '第二趟补货',
-                caps: [16, 8, 8, 8, 8],
-                queuePreview: 2,
-                counts: { milk: 16, veg: 8, fruit: 8, meat: 8, sauce: 8 },
-                columns: COLS6,
-                plan: '牛奶只能拿 16。四份 8 件各拿一只 8。牛奶若拿两只 8，16 那格没人能填。',
-            },
-            {
-                id: 'C',
-                title: '冷藏室塞满',
-                caps: [18, 10, 8, 10, 10],
-                queuePreview: 2,
-                counts: { milk: 18, veg: 10, sauce: 8, fruit: 10, meat: 10 },
-                columns: COLS7,
-                plan: '牛奶拿 18，酱拿唯一的 8，三份 10 件各拿一只 10。牛奶若拆成 10+8，18 那格空挂。',
-            },
-        ],
+        title: '肉 10，水果 8',
+        goal: '先认 10，再认 8。肉吃 10，水果吃 8，牛奶再收两只 6。',
+        replay: '我先把水果点乱了，10 和 8 的归属一起错掉',
+        openTrays: 4,
+        preview: 1,
+        caps: [10, 8, 6, 6, 6],
+        counts: { meat: 10, fruit: 8, veg: 6, milk: 12 },
+        order: ['meat', 'fruit', 'veg', 'milk'],
+        plan: '肉对 10。水果对 8。青菜对 6。牛奶吃两只 6。',
     },
     {
-        id: 'bulk_03',
-        title: '有一色必须吃两格，而且两格不挨着',
-        unlockCleared: 0,
-        counterSlots: 3,
-        bufferStackCap: 5,
-        goal: '第三趟牛奶 16 只能是头尾两只 8，中间隔着四只 10。',
-        targetMinutes: [3.9, 6.5],
-        expectedReplayLine: '牛奶要两只 8，我把其中一只让给 10 件的食材了',
-        stages: [
-            {
-                id: 'A',
-                title: '第一趟到家',
-                caps: [10, 10, 10, 10, 8],
-                queuePreview: 1,
-                counts: { milk: 18, meat: 10, veg: 10, fruit: 10 },
-                columns: COLS6,
-                plan: '牛奶 18 = 10+8，预告里的 8 必须给牛奶。10 件锁进这只 8 会剩 2。',
-            },
-            {
-                id: 'B',
-                title: '第二趟补货',
-                caps: [12, 10, 10, 8, 8],
-                queuePreview: 2,
-                counts: { meat: 12, milk: 10, veg: 10, fruit: 8, sauce: 8 },
-                columns: COLS6,
-                plan: '五本小票各对一格：肉 12，牛奶 10，青菜 10，苹果 8，酱 8。不要拆。',
-            },
-            {
-                id: 'C',
-                title: '冷藏室塞满',
-                caps: [8, 10, 10, 10, 10, 8],
-                queuePreview: 2,
-                counts: { milk: 16, veg: 10, fruit: 10, meat: 10, sauce: 10 },
-                columns: COLS7,
-                plan: '牛奶 16 只能是头尾两只 8，中间四只 10 给四份 10 件。10 件锁进 8 会剩 2。',
-            },
+        title: '青菜和牛奶都要两格',
+        goal: '肉先占最左的 8。青菜、牛奶各吃两只 6。',
+        replay: '我让青菜占了最左的 8，后面两只 6 不够它收完',
+        openTrays: 4,
+        preview: 1,
+        caps: [8, 6, 6, 6, 6, 6],
+        counts: { meat: 8, fruit: 6, veg: 12, milk: 12 },
+        order: ['meat', 'fruit', 'veg', 'milk'],
+        presetBags: [
+            ['milk', 'veg', 'milk', 'fruit', 'veg', 'veg', 'meat'],
+            ['milk', 'meat', 'veg', 'milk', 'meat', 'veg', 'fruit'],
+            ['veg', 'fruit', 'milk', 'meat', 'milk', 'veg'],
+            ['meat', 'milk', 'veg', 'fruit', 'veg', 'milk'],
+            ['milk', 'veg', 'fruit', 'meat', 'milk', 'veg'],
+            ['meat', 'veg', 'milk', 'fruit', 'meat', 'milk'],
         ],
+        plan: '肉 8 对最左。水果 6 接第一张补格。青菜 12 吃下一张补格和一只 6。牛奶 12 吃剩下两只 6。',
     },
     {
-        id: 'bulk_04',
-        title: '预告那一张先留着',
-        unlockCleared: 0,
-        counterSlots: 3,
-        bufferStackCap: 5,
-        goal: '第一趟只预告 1 格，那一张是 10 件酱的唯一去处，场上的 14 不能先给酱。',
-        targetMinutes: [3.9, 6.5],
-        expectedReplayLine: '我把 10 件酱锁进 14 格了',
-        stages: [
-            {
-                id: 'A',
-                title: '第一趟到家',
-                caps: [14, 8, 8, 8, 10],
-                queuePreview: 1,
-                counts: { meat: 14, milk: 8, veg: 8, fruit: 8, sauce: 10 },
-                columns: COLS6,
-                plan: '肉 14，牛奶 8，青菜 8，苹果 8，酱 10。场上没有 10，预告那只 10 是酱的唯一去处。酱锁进 14 凑不满。',
-            },
-            {
-                id: 'B',
-                title: '第二趟补货',
-                caps: [12, 10, 8, 10, 8],
-                queuePreview: 2,
-                counts: { meat: 12, milk: 10, veg: 8, fruit: 10, sauce: 8 },
-                columns: COLS6,
-                plan: '肉 12，牛奶 10，青菜 8，苹果 10，酱 8。12 只属于肉。10 或 8 锁进 12 都凑不满。',
-            },
-            {
-                id: 'C',
-                title: '冷藏室塞满',
-                caps: [16, 12, 10, 10, 8],
-                queuePreview: 2,
-                counts: { milk: 16, meat: 12, veg: 10, fruit: 10, sauce: 8 },
-                columns: COLS7,
-                plan: '牛奶 16，肉 12，青菜 10，苹果 10，酱 8。只有一只 8，在预告里，只能给酱。酱锁进 16 或 12 都凑不满。',
-            },
-        ],
+        title: '青菜 8，肉 8',
+        goal: '这关不是只认一个 8。青菜和肉各占一只 8。',
+        replay: '我先把水果点早了，两只 8 的顺序都乱了',
+        openTrays: 4,
+        preview: 1,
+        caps: [8, 8, 6, 6, 6],
+        counts: { veg: 8, meat: 8, fruit: 6, milk: 12 },
+        order: ['veg', 'meat', 'fruit', 'milk'],
+        plan: '青菜对一只 8。肉对另一只 8。水果对 6。牛奶吃两只 6。',
     },
     {
-        id: 'bulk_05',
-        title: '中间那格不是你的',
-        unlockCleared: 0,
-        counterSlots: 3,
-        bufferStackCap: 5,
-        goal: '第三趟牛奶的两只 8 中间只隔 1 格，那格是 10 件食材的，不是牛奶的。',
-        targetMinutes: [3.9, 6.5],
-        expectedReplayLine: '我把中间那只 10 算进牛奶里了',
-        stages: [
-            {
-                id: 'A',
-                title: '第一趟到家',
-                caps: [12, 8, 12, 8, 8],
-                queuePreview: 1,
-                counts: { milk: 12, veg: 8, meat: 12, fruit: 8, sauce: 8 },
-                columns: COLS6,
-                plan: '牛奶 12，青菜 8，肉 12，苹果 8，酱 8。五本数各对一格。8 件锁进 12 凑不满。',
-            },
-            {
-                id: 'B',
-                title: '第二趟补货',
-                caps: [10, 8, 12, 8, 10],
-                queuePreview: 2,
-                counts: { veg: 10, fruit: 8, milk: 12, sauce: 8, meat: 10 },
-                columns: COLS6,
-                plan: '青菜 10，苹果 8，牛奶 12，酱 8，肉 10。12 只属于牛奶。10 或 8 锁进 12 都凑不满。',
-            },
-            {
-                id: 'C',
-                title: '冷藏室塞满',
-                caps: [10, 10, 10, 8, 10, 8],
-                queuePreview: 2,
-                counts: { veg: 10, fruit: 10, meat: 10, milk: 16, sauce: 10 },
-                columns: COLS7,
-                plan: '牛奶 16 只能是两只 8。场上最后一格是 8，第二张预告也是 8，中间那张预告是 10，给 10 件的食材。',
-            },
-        ],
+        title: '水果 10，牛奶 8',
+        goal: '水果先吃 10，牛奶要留给 8，肉再去收两只 6。',
+        replay: '我先把牛奶点进了 10，后面的 8 没给它留',
+        openTrays: 4,
+        preview: 1,
+        caps: [10, 8, 6, 6, 6],
+        counts: { fruit: 10, milk: 8, veg: 6, meat: 12 },
+        order: ['fruit', 'milk', 'veg', 'meat'],
+        plan: '水果对 10。牛奶对 8。青菜对 6。肉吃两只 6。',
     },
     {
-        id: 'bulk_06',
-        title: '别把小格让给大数',
-        unlockCleared: 0,
-        counterSlots: 3,
-        bufferStackCap: 5,
-        goal: '第三趟牛奶的 20 不能拆成 12+8，拆了就会空出 20，并挤掉一份 8 件。第二趟先练 14 装不下 8 或 10。',
-        targetMinutes: [3.9, 6.5],
-        expectedReplayLine: '我把 12 和 8 拆给了牛奶，有一份 8 件没地方去了',
-        stages: [
-            {
-                id: 'A',
-                title: '第一趟到家',
-                caps: [10, 10, 8, 10, 10],
-                queuePreview: 1,
-                counts: { milk: 10, veg: 10, fruit: 8, meat: 10, sauce: 10 },
-                columns: COLS6,
-                plan: '苹果 8 对场上那只 8。牛奶、青菜、肉、酱都是 10，各对一只 10。',
-            },
-            {
-                id: 'B',
-                title: '第二趟补货',
-                caps: [8, 10, 14, 8, 8],
-                queuePreview: 2,
-                counts: { milk: 8, sauce: 10, meat: 14, veg: 8, fruit: 8 },
-                columns: COLS6,
-                plan: '肉 14，酱 10，牛奶、青菜、苹果都是 8。8 或 10 锁进 14 都凑不满。14 不能拆成两只 8。',
-            },
-            {
-                id: 'C',
-                title: '冷藏室塞满',
-                caps: [20, 12, 8, 8, 8],
-                queuePreview: 2,
-                counts: { milk: 20, meat: 12, veg: 8, fruit: 8, sauce: 8 },
-                columns: COLS7,
-                plan: '牛奶 20 对那只 20，肉 12，三份 8 各对一只 8。牛奶若拆成 12+8，20 空挂，并且有一份 8 件没有格子。8 或 12 直接锁进 20 也凑不满。',
-            },
-        ],
+        title: '两种都要吃两格',
+        goal: '青菜占最左的 10。肉和牛奶各吃两只 6。',
+        replay: '我把肉点进了最左的 10',
+        openTrays: 4,
+        preview: 1,
+        caps: [10, 6, 6, 6, 6, 6],
+        counts: { veg: 10, fruit: 6, meat: 12, milk: 12 },
+        order: ['veg', 'fruit', 'meat', 'milk'],
+        plan: '青菜 10 对最左。水果 6 接第一张补格。肉 12 吃第二张补格和一只 6。牛奶 12 吃剩下两只 6。',
     },
     {
-        id: 'bulk_07',
-        title: '剩菜登场，牛奶要吃两格',
-        unlockCleared: 0,
-        counterSlots: 3,
-        bufferStackCap: 5,
-        goal: '第三趟牛奶要吃 14 和 10 两格，不能拆成三只 8。第二趟先认 18 只能是 10 加一只 8。',
-        targetMinutes: [5, 8],
-        expectedReplayLine: '我把牛奶拆成三只 8，14 和 10 就空了',
-        stages: [
-            {
-                id: 'A',
-                title: '第一趟到家',
-                caps: [12, 10, 8, 10, 8],
-                queuePreview: 1,
-                counts: { meat: 12, milk: 10, veg: 10, fruit: 8, leftover: 8 },
-                columns: COLS6,
-                plan: '肉 12，牛奶 10，青菜 10，苹果和剩菜各 8。两只 8 可以互换。8 锁进 12 会剩 4，锁进 10 会剩 2。',
-            },
-            {
-                id: 'B',
-                title: '第二趟补货',
-                caps: [10, 8, 14, 8, 8, 8],
-                queuePreview: 2,
-                counts: { milk: 18, meat: 14, fruit: 8, sauce: 8, leftover: 8 },
-                columns: COLS7,
-                plan: '肉 14 对那只 14。牛奶 18 只能是 10 加任意一只 8。苹果、酱、剩菜各 8。8 或 10 锁进 14 都凑不满。',
-            },
-            {
-                id: 'C',
-                title: '冷藏室塞满',
-                caps: [14, 8, 10, 8, 8, 8, 8],
-                queuePreview: 2,
-                counts: { milk: 24, veg: 8, fruit: 8, meat: 8, sauce: 8, leftover: 8 },
-                columns: COLS8,
-                plan: '牛奶 24 只能是 14+10。五份 8 件各对一只 8。牛奶若拿三只 8，14 和 10 没人能填。14 和 10 开局都在场上，中间隔着一只 8。',
-            },
-        ],
+        title: '水果 8，青菜 8',
+        goal: '水果和青菜各有一只 8。先把两个 8 位分清。',
+        replay: '我先把肉点早了，后面两个 8 的归属乱掉了',
+        openTrays: 4,
+        preview: 1,
+        caps: [8, 8, 6, 6, 6],
+        counts: { fruit: 8, veg: 8, meat: 6, milk: 12 },
+        order: ['fruit', 'veg', 'meat', 'milk'],
+        plan: '水果对一只 8。青菜对另一只 8。肉对 6。牛奶吃两只 6。',
     },
     {
-        id: 'bulk_08',
-        title: '下一段在预告里',
-        unlockCleared: 0,
-        counterSlots: 3,
-        bufferStackCap: 5,
-        goal: '第三趟牛奶的 26 只能是 14+12，12 在第一张预告。第二趟两只 8 里，后一只也在预告。',
-        targetMinutes: [5, 8],
-        expectedReplayLine: '我把 10 锁进了牛奶那只 14',
-        stages: [
-            {
-                id: 'A',
-                title: '第一趟到家',
-                caps: [14, 8, 10, 8, 8],
-                queuePreview: 1,
-                counts: { meat: 14, veg: 8, milk: 10, fruit: 8, leftover: 8 },
-                columns: COLS6,
-                plan: '肉 14，牛奶 10，青菜、苹果、剩菜各 8。三只 8 可以互换。8 或 10 锁进 14 都凑不满。',
-            },
-            {
-                id: 'B',
-                title: '第二趟补货',
-                caps: [8, 10, 10, 10, 8, 10],
-                queuePreview: 2,
-                counts: { milk: 16, veg: 10, fruit: 10, meat: 10, sauce: 10 },
-                columns: COLS7,
-                plan: '牛奶 16 只能是两只 8。第一只在场上，第二只是第一张预告，中间三只 10 都在场上。10 锁进 8 会剩 2。',
-            },
-            {
-                id: 'C',
-                title: '冷藏室塞满',
-                caps: [14, 10, 10, 10, 12, 8],
-                queuePreview: 2,
-                counts: { milk: 26, veg: 10, fruit: 10, sauce: 10, leftover: 8 },
-                columns: COLS8,
-                plan: '牛奶 26 只能是 14+12。14 在场上，12 是第一张预告，中间三只 10 都在场上，剩菜 8 是第二张预告。10 锁进 14 会剩 4，锁进 12 会剩 2。',
-            },
-        ],
+        title: '肉 10，水果 8，双 12',
+        goal: '肉先吃 10，水果再吃 8，青菜和牛奶都要规划两只 6。',
+        replay: '我先让水果去吃 10，后面的 8 和两只 6 都不够了',
+        openTrays: 4,
+        preview: 1,
+        caps: [10, 8, 6, 6, 6, 6],
+        counts: { meat: 10, fruit: 8, veg: 12, milk: 12 },
+        order: ['meat', 'fruit', 'veg', 'milk'],
+        plan: '肉对 10。水果对 8。青菜吃两只 6。牛奶也吃两只 6。',
+    },
+    {
+        title: '肉 8，酱 8',
+        goal: '第五种食物第一次真正参与抢位：肉和酱各吃一只 8。',
+        replay: '我先把酱点成了 6 件杂色，肉后面的窗口也被拖慢了',
+        openTrays: 4,
+        preview: 2,
+        caps: [8, 8, 6, 6, 6, 6],
+        counts: { meat: 8, sauce: 8, fruit: 6, veg: 6, milk: 12 },
+        order: ['meat', 'sauce', 'fruit', 'veg', 'milk'],
+        plan: '肉对一只 8。酱对另一只 8。水果和青菜各对 6。牛奶吃两只 6。',
+    },
+    {
+        title: '肉 10，酱 8',
+        goal: '肉吃 10，酱吃 8。五种食物第一次一起抢两只大格。',
+        replay: '我先让酱进了 10，后面的 8 没给它留',
+        openTrays: 4,
+        preview: 2,
+        caps: [10, 8, 6, 6, 6, 6],
+        counts: { meat: 10, sauce: 8, fruit: 6, veg: 6, milk: 12 },
+        order: ['meat', 'sauce', 'fruit', 'veg', 'milk'],
+        plan: '肉对 10。酱对 8。水果和青菜各对 6。牛奶吃两只 6。',
+    },
+    {
+        title: '青菜 8，肉 8',
+        goal: '青菜先拿一只 8，肉拿另一只 8，酱和牛奶都是后手。',
+        replay: '我先把牛奶点早了，两只 8 的窗口都被拖慢了',
+        openTrays: 4,
+        preview: 2,
+        caps: [8, 8, 6, 6, 6, 6],
+        counts: { veg: 8, meat: 8, fruit: 6, sauce: 6, milk: 12 },
+        order: ['veg', 'meat', 'fruit', 'sauce', 'milk'],
+        plan: '青菜对一只 8。肉对另一只 8。水果和酱各对 6。牛奶吃两只 6。',
+    },
+    {
+        title: '肉 12，酱 8',
+        goal: '肉吃 12，酱吃 8，另外三种都是单格食材。',
+        replay: '我先把酱锁进了 12，后面的 8 就闲掉了',
+        openTrays: 4,
+        preview: 2,
+        caps: [12, 8, 6, 6, 6],
+        counts: { meat: 12, sauce: 8, fruit: 6, veg: 6, milk: 6 },
+        order: ['meat', 'sauce', 'fruit', 'veg', 'milk'],
+        plan: '肉对 12。酱对 8。水果、青菜、牛奶各对 6。',
+    },
+    {
+        title: '水果 8，酱 8',
+        goal: '两只 8 要分别留给水果和酱，别被 6 件食材抢掉节奏。',
+        replay: '我先点了青菜，水果和酱的 8 位都不够用了',
+        openTrays: 4,
+        preview: 2,
+        caps: [8, 8, 6, 6, 6, 6],
+        counts: { fruit: 8, sauce: 8, veg: 6, meat: 6, milk: 12 },
+        order: ['fruit', 'sauce', 'veg', 'meat', 'milk'],
+        plan: '水果对一只 8。酱对另一只 8。青菜和肉各对 6。牛奶吃两只 6。',
+    },
+    {
+        title: '青菜 10，水果 8，酱 8',
+        goal: '青菜先占 10，水果和酱各要一只 8。',
+        replay: '我先把水果点进了 10，后面的 8 窗口就不够了',
+        openTrays: 4,
+        preview: 2,
+        caps: [10, 8, 8, 6, 6],
+        counts: { veg: 10, fruit: 8, sauce: 8, meat: 6, milk: 6 },
+        order: ['veg', 'fruit', 'sauce', 'meat', 'milk'],
+        plan: '青菜对 10。水果对一只 8。酱对另一只 8。肉和牛奶各对 6。',
+    },
+    {
+        title: '酱 8，水果 8',
+        goal: '酱和水果各有一只 8，顺序错了会挤掉后手。',
+        replay: '我先点了肉，两个 8 都被别的颜色挤占了',
+        openTrays: 4,
+        preview: 2,
+        caps: [8, 8, 6, 6, 6, 6],
+        counts: { sauce: 8, fruit: 8, veg: 6, meat: 6, milk: 12 },
+        order: ['sauce', 'fruit', 'veg', 'meat', 'milk'],
+        plan: '酱对一只 8。水果对另一只 8。青菜和肉各对 6。牛奶吃两只 6。',
+    },
+    {
+        title: '水果 10，酱 8',
+        goal: '水果吃 10，酱吃 8。后手的牛奶仍要吃两只 6。',
+        replay: '我先把酱点错到 10，水果就没位子了',
+        openTrays: 4,
+        preview: 2,
+        caps: [10, 8, 6, 6, 6, 6],
+        counts: { fruit: 10, sauce: 8, meat: 6, veg: 6, milk: 12 },
+        order: ['fruit', 'sauce', 'meat', 'veg', 'milk'],
+        plan: '水果对 10。酱对 8。肉和青菜各对 6。牛奶吃两只 6。',
+    },
+    {
+        title: '五个格一起开',
+        goal: '场上 5 格，都是 6。先把 18 件牛奶收满，再点别的。',
+        replay: '我先点了青菜，牛奶那 18 件被拆散了',
+        openTrays: 5,
+        preview: 2,
+        caps: SIX.concat([6]),
+        counts: { milk: 18, veg: 6, fruit: 6, meat: 6, sauce: 6 },
+        order: ['milk', 'veg', 'fruit', 'meat', 'sauce'],
+        plan: '牛奶 18 吃最左和两张补格。青菜、水果、肉、酱各一只 6。',
+    },
+    {
+        title: '青菜 12，牛奶 12',
+        goal: '进入 5 格后，不再只有一个大主角；青菜和牛奶都要吃两段。',
+        replay: '我先把青菜和牛奶的两段顺序点反了',
+        openTrays: 5,
+        preview: 2,
+        caps: [12, 6, 6, 6, 6, 6],
+        counts: { veg: 12, milk: 12, fruit: 6, meat: 6, sauce: 6 },
+        order: ['veg', 'milk', 'fruit', 'meat', 'sauce'],
+        plan: '青菜对 12。牛奶吃两只 6。水果、肉、酱各对 6。',
+    },
+    {
+        title: '水果 16',
+        goal: '水果 16 件，要吃两只 8；其它四种仍各 6。',
+        replay: '我先点了肉，水果的第二只 8 就被占了',
+        openTrays: 5,
+        preview: 2,
+        caps: [8, 8, 6, 6, 6, 6],
+        counts: { fruit: 16, milk: 6, veg: 6, meat: 6, sauce: 6 },
+        order: ['fruit', 'milk', 'veg', 'meat', 'sauce'],
+        plan: '水果吃两只 8。牛奶、青菜、肉、酱各对 6。',
+    },
+    {
+        title: '肉 18',
+        goal: '肉 18 件，这回不是三只 6，而是 10 加 8。',
+        replay: '我先把 8 提前让给了别的颜色，肉后面就接不上了',
+        openTrays: 5,
+        preview: 2,
+        caps: [10, 8, 6, 6, 6, 6],
+        counts: { meat: 18, milk: 6, veg: 6, fruit: 6, sauce: 6 },
+        order: ['meat', 'milk', 'veg', 'fruit', 'sauce'],
+        plan: '肉吃 10 和 8。牛奶、青菜、水果、酱各对 6。',
+    },
+    {
+        title: '酱 16',
+        goal: '酱有 16 件，先把两只 8 都留给它。',
+        replay: '我先点了水果，酱就被拆成了两半',
+        openTrays: 5,
+        preview: 2,
+        caps: [8, 8, 6, 6, 6, 6],
+        counts: { sauce: 16, milk: 6, veg: 6, fruit: 6, meat: 6 },
+        order: ['sauce', 'milk', 'veg', 'fruit', 'meat'],
+        plan: '酱吃两只 8。其余四种各对 6。',
+    },
+    {
+        title: '剩菜 16',
+        goal: '剩菜 16 件，先占两只 8，再收别的。',
+        replay: '我把剩菜留晚了，两只 8 就都没了',
+        openTrays: 5,
+        preview: 2,
+        caps: [8, 8, 6, 6, 6, 6],
+        counts: { leftover: 16, milk: 6, veg: 6, fruit: 6, meat: 6 },
+        order: ['leftover', 'milk', 'veg', 'fruit', 'meat'],
+        plan: '剩菜吃两只 8。其余四种各对 6。',
+    },
+    {
+        title: '青菜 12，水果 12',
+        goal: '两种 12 同时在场，不再只有一个 18 主角。',
+        replay: '我先点错了青菜，水果后面就没有两只 6 可接了',
+        openTrays: 5,
+        preview: 2,
+        caps: [12, 6, 6, 6, 6, 6],
+        counts: { veg: 12, fruit: 12, meat: 6, sauce: 6, leftover: 6 },
+        order: ['veg', 'fruit', 'meat', 'sauce', 'leftover'],
+        plan: '青菜对 12。水果吃两只 6。肉、酱、剩菜各对 6。',
+    },
+    {
+        title: '水果 16，剩菜 8',
+        goal: '最后一关先给水果留两只 8，再把剩菜放进 8。',
+        replay: '我先点了酱，水果和剩菜都没凑够自己的窗口',
+        openTrays: 5,
+        preview: 2,
+        caps: [10, 8, 6, 6, 6, 6, 6],
+        counts: { fruit: 16, leftover: 8, milk: 6, meat: 6, sauce: 6, veg: 6 },
+        order: ['fruit', 'leftover', 'milk', 'meat', 'sauce', 'veg'],
+        plan: '水果先吃大格再补满。剩菜对 8。牛奶、肉、酱、青菜各对 6。',
     },
 ];
 
-function maxAdjacentPairs(depth: number): number {
-    return Math.floor((depth - 1) * 0.3);
-}
+/**
+ * 教学节奏顺序：
+ * 1–8 先从单大格、双 8，再进双段食材。
+ * 9–16 再上五种食材与多窗口争抢。
+ * 17–24 最后是 5 格中盘规划。
+ */
+const BULK_LEVEL_ORDER = [
+    0, 1, 3, 4, 2, 6, 5, 7,
+    8, 9, 10, 11, 12, 14, 13, 15,
+    16, 17, 18, 19, 20, 21, 22, 23,
+] as const;
 
-function layoutBags(counts: Partial<Record<FoodId, number>>, lengths: number[]): FoodId[][] {
-    const cols = lengths.map(() => [] as FoodId[]);
-    const pairs = lengths.map(() => 0);
-    const left: Partial<Record<FoodId, number>> = {};
-    for (let i = 0; i < FOOD_IDS.length; i++) {
-        const id = FOOD_IDS[i];
-        if ((counts[id] || 0) > 0) left[id] = counts[id];
-    }
-    const canPlace = (col: number, id: FoodId): boolean => {
-        const bag = cols[col];
-        if (bag.length >= lengths[col]) return false;
-        const top = bag.length - 1;
-        if (top >= 1 && bag[top] === id && bag[top - 1] === id) return false;
-        if (top >= 0 && bag[top] === id && pairs[col] + 1 > maxAdjacentPairs(lengths[col])) return false;
-        return true;
-    };
-    const foodsLeft = (): FoodId[] => {
-        const foods: FoodId[] = [];
-        for (let i = 0; i < FOOD_IDS.length; i++) {
-            const id = FOOD_IDS[i];
-            if ((left[id] || 0) > 0) foods.push(id);
-        }
-        foods.sort((a, b) => (left[b] || 0) - (left[a] || 0) || FOOD_IDS.indexOf(a) - FOOD_IDS.indexOf(b));
-        return foods;
-    };
-    const commit = (col: number, id: FoodId) => {
-        const bag = cols[col];
-        if (bag.length > 0 && bag[bag.length - 1] === id) pairs[col] += 1;
-        bag.push(id);
-        left[id] = (left[id] || 0) - 1;
-    };
-    const undo = (col: number, id: FoodId) => {
-        const bag = cols[col];
-        bag.pop();
-        if (bag.length > 0 && bag[bag.length - 1] === id) pairs[col] -= 1;
-        left[id] = (left[id] || 0) + 1;
-    };
-    const columnsAreMixed = (): boolean => {
-        for (let i = 0; i < cols.length; i++) {
-            if (cols[i].length < 2) continue;
-            const kind = cols[i][0];
-            let mixed = false;
-            for (let n = 1; n < cols[i].length; n++) {
-                if (cols[i][n] !== kind) mixed = true;
-            }
-            if (!mixed) return false;
-        }
-        return true;
-    };
-    const canSitOnOther = (id: FoodId): boolean => {
-        for (let i = 0; i < cols.length; i++) {
-            if (!canPlace(i, id)) continue;
-            const bag = cols[i];
-            if (bag.length === 0 || bag[bag.length - 1] !== id) return true;
-        }
-        return false;
-    };
-    const reset = () => {
-        for (let i = 0; i < cols.length; i++) {
-            cols[i].length = 0;
-            pairs[i] = 0;
-        }
-        for (let i = 0; i < FOOD_IDS.length; i++) {
-            const id = FOOD_IDS[i];
-            if ((counts[id] || 0) > 0) left[id] = counts[id];
-            else delete left[id];
-        }
-    };
-    const search = (smart: boolean, limit: number): boolean => {
-        reset();
-        let nodes = 0;
-        const dfs = (): boolean => {
-            if (++nodes > limit) return false;
-            const foods = foodsLeft();
-            if (foods.length === 0) return columnsAreMixed();
-            if (smart) {
-                foods.sort((a, b) => {
-                    const openA = canSitOnOther(a) ? 0 : 1;
-                    const openB = canSitOnOther(b) ? 0 : 1;
-                    if (openA !== openB) return openA - openB;
-                    return (left[b] || 0) - (left[a] || 0) || FOOD_IDS.indexOf(a) - FOOD_IDS.indexOf(b);
-                });
-            }
-            const id = foods[0];
-            const ranked: number[] = [];
-            for (let i = 0; i < cols.length; i++) {
-                if (canPlace(i, id)) ranked.push(i);
-            }
-            ranked.sort((a, b) => {
-                const bagA = cols[a];
-                const bagB = cols[b];
-                const sameA = bagA.length > 0 && bagA[bagA.length - 1] === id ? 1 : 0;
-                const sameB = bagB.length > 0 && bagB[bagB.length - 1] === id ? 1 : 0;
-                if (sameA !== sameB) return sameA - sameB;
-                if (bagA.length !== bagB.length) return bagA.length - bagB.length;
-                return a - b;
-            });
-            for (let i = 0; i < ranked.length; i++) {
-                const col = ranked[i];
-                commit(col, id);
-                if (dfs()) return true;
-                undo(col, id);
-            }
-            return false;
-        };
-        return dfs();
-    };
-    if (search(false, 20000)) return cols;
-    if (search(true, 200000)) return cols;
-    throw new Error('bulk bags cannot satisfy stack rules');
-}
+export const BULK_LEVEL_CONFIGS: BulkLevelConfig[] = BULK_LEVEL_ORDER.map((specIndex, index) => {
+    return buildBulkLevel(index, BULK_LEVEL_SPECS[specIndex]);
+});
 
 function assertStageShape(level: BulkLevelConfig, stage: BulkLevelStageConfig): void {
     const capSum = stage.caps.reduce((sum, cap) => sum + cap, 0);
@@ -483,7 +405,10 @@ function assertStageShape(level: BulkLevelConfig, stage: BulkLevelStageConfig): 
             throw new Error(`${level.id}/${stage.id} cap ${cap} not in pool`);
         }
     }
-    if (stage.caps.length < 4) throw new Error(`${level.id}/${stage.id} trays<4`);
+    if (stage.caps.length < level.openTrays) throw new Error(`${level.id}/${stage.id} trays<${level.openTrays}`);
+    let orderSum = 0;
+    for (let i = 0; i < stage.order.length; i++) orderSum += stage.counts[stage.order[i]] || 0;
+    if (orderSum !== capSum) throw new Error(`${level.id}/${stage.id} order!=caps`);
     for (let i = 0; i < stage.columns.length; i++) {
         if (stage.columns[i] < 2) throw new Error(`${level.id}/${stage.id} column ${i} too shallow`);
     }
@@ -502,9 +427,8 @@ function tidySlackOf(level: BulkLevelConfig): number {
 
 const loadedRuns = new Map<string, BulkRunDef>();
 
-function makeStageShell(level: BulkLevelConfig, stage: BulkLevelStageConfig, stageIndex: number): BulkStageDef {
-    const itemCount = stage.columns.reduce((sum, depth) => sum + depth, 0);
-    const loaded: BulkStageDef = {
+function makeStageShell(_level: BulkLevelConfig, stage: BulkLevelStageConfig, _stageIndex: number): BulkStageDef {
+    return {
         id: stage.id,
         title: stage.title,
         trays: stage.caps.map((cap) => ({ cap })),
@@ -513,13 +437,74 @@ function makeStageShell(level: BulkLevelConfig, stage: BulkLevelStageConfig, sta
         receipt: { ...stage.counts },
         plan: stage.plan,
     };
-    if (level.stages.length >= 3 && stageIndex === level.stages.length - 1) {
-        loaded.checkpointItems = Math.floor(itemCount * 0.4);
-    }
-    return loaded;
 }
 
-/** 只铺这一趟的袋子。进关 / 进下一趟时再调。 */
+/** 按收纳顺序从底往上铺。先收的食物留在栈顶，同列连续最多 3 个。 */
+function weaveBags(order: FoodId[], counts: Partial<Record<FoodId, number>>, lengths: number[]): FoodId[][] {
+    const cols = lengths.map(() => [] as FoodId[]);
+    const runLen = (bag: FoodId[]): number => {
+        if (bag.length === 0) return 0;
+        const top = bag[bag.length - 1];
+        let n = 0;
+        for (let i = bag.length - 1; i >= 0; i--) {
+            if (bag[i] !== top) break;
+            n += 1;
+        }
+        return n;
+    };
+    for (let f = order.length - 1; f >= 0; f--) {
+        const id = order[f];
+        let left = counts[id] || 0;
+        let cursor = 0;
+        let guard = 0;
+        while (left > 0) {
+            if (++guard > 10000) throw new Error(`weave stuck ${id}`);
+            let placed = false;
+            for (let k = 0; k < cols.length; k++) {
+                const i = (cursor + k) % cols.length;
+                if (cols[i].length >= lengths[i]) continue;
+                const top = cols[i].length > 0 ? cols[i][cols[i].length - 1] : null;
+                if (top === id && runLen(cols[i]) >= 3) continue;
+                cols[i].push(id);
+                left -= 1;
+                cursor = i + 1;
+                placed = true;
+                break;
+            }
+            if (!placed) throw new Error(`weave no room for ${id}`);
+        }
+    }
+    softenTopKinds(cols, order);
+    return cols;
+}
+
+/**
+ * 自动铺袋后，尽量把前 2–3 个优先食材都露一点栈顶，避免整排全是同一种。
+ * 只做列内轻挪动，不改总件数。
+ */
+function softenTopKinds(cols: FoodId[][], order: FoodId[]): void {
+    const wanted = order.slice(0, Math.min(3, order.length));
+    if (wanted.length <= 1) return;
+    const topOf = (bag: FoodId[]): FoodId | null => (bag.length > 0 ? bag[bag.length - 1] : null);
+    const hasTop = (id: FoodId): boolean => cols.some((bag) => topOf(bag) === id);
+    for (let w = 1; w < wanted.length; w++) {
+        const id = wanted[w];
+        if (hasTop(id)) continue;
+        for (let c = 0; c < cols.length; c++) {
+            const bag = cols[c];
+            if (bag.length < 2) continue;
+            for (let i = bag.length - 2; i >= 0; i--) {
+                if (bag[i] !== id) continue;
+                bag.splice(i, 1);
+                bag.push(id);
+                c = cols.length;
+                break;
+            }
+        }
+    }
+}
+
+/** 进关时再铺袋子。一关只有一袋。 */
 export function ensureBulkStageBags(run: BulkRunDef, stageIndex: number): void {
     const stage = run.stages[stageIndex];
     if (!stage) throw new Error(`${run.id} stage ${stageIndex} missing`);
@@ -528,8 +513,8 @@ export function ensureBulkStageBags(run: BulkRunDef, stageIndex: number): void {
     const cfg = level?.stages[stageIndex];
     if (!level || !cfg) throw new Error(`${run.id} config missing stage ${stageIndex}`);
     assertStageShape(level, cfg);
-    stage.bags = layoutBags(cfg.counts, cfg.columns);
-    assertBulkStageDef(stage);
+    stage.bags = cfg.presetBags ? cloneBags(cfg.presetBags) : weaveBags(cfg.order, cfg.counts, cfg.columns);
+    assertBulkStageDef(stage, level.openTrays);
 }
 
 export function loadBulkLevel(level: BulkLevelConfig): BulkRunDef {
@@ -545,6 +530,7 @@ export function loadBulkLevel(level: BulkLevelConfig): BulkRunDef {
         unlockCleared: level.unlockCleared,
         counterSlots: level.counterSlots,
         bufferStackCap: level.bufferStackCap,
+        openTrays: level.openTrays,
         tidySlack: tidySlackOf(level),
         stages,
     };

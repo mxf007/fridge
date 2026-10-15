@@ -18,7 +18,9 @@ import {
 } from './types';
 import { ensureBulkStageBags } from './levelConfig';
 
-const OPEN_TRAY_COUNT = 4;
+function openTrayCount(run: BulkRunDef): number {
+    return run.openTrays > 0 ? run.openTrays : 4;
+}
 
 function makeActiveTray(tray: BulkTrayDef, queueIndex: number): BulkActiveTrayState {
     return {
@@ -140,21 +142,25 @@ export class BulkPurchaseState {
             }
             if (remaining <= 0) continue;
             let capLeft = 0;
+            let openRemainder = 0;
             let hasOpenSame = false;
             let emptyCap = 0;
             for (let i = 0; i < this.activeTrays.length; i++) {
                 const tray = this.activeTrays[i];
                 if (tray.sealed) continue;
                 if (tray.kind === kind) {
-                    capLeft += tray.cap - tray.filled;
+                    const hole = tray.cap - tray.filled;
+                    capLeft += hole;
+                    openRemainder += hole;
                     hasOpenSame = true;
                 } else if (tray.kind == null) {
                     emptyCap += tray.cap;
                 }
             }
+            if (hasOpenSame && remaining < openRemainder) return true;
             let queueCap = 0;
             for (let i = 0; i < this.queuedTrays.length; i++) queueCap += this.queuedTrays[i].cap;
-            capLeft += hasOpenSame ? queueCap : emptyCap + queueCap;
+            capLeft += emptyCap + queueCap;
             if (remaining > capLeft) return true;
         }
         return false;
@@ -177,21 +183,29 @@ export class BulkPurchaseState {
             }
             if (remaining <= 0) continue;
             let capLeft = 0;
+            let openRemainder = 0;
             let hasOpenSame = false;
             let emptyCap = 0;
             for (let i = 0; i < this.activeTrays.length; i++) {
                 const tray = this.activeTrays[i];
                 if (tray.sealed) continue;
                 if (tray.kind === kind) {
-                    capLeft += tray.cap - tray.filled;
+                    const hole = tray.cap - tray.filled;
+                    capLeft += hole;
+                    openRemainder += hole;
                     hasOpenSame = true;
                 } else if (tray.kind == null) {
                     emptyCap += tray.cap;
                 }
             }
+            if (hasOpenSame && remaining < openRemainder) {
+                if (!first) first = kind;
+                if (!onTray) onTray = kind;
+                continue;
+            }
             let queueCap = 0;
             for (let i = 0; i < this.queuedTrays.length; i++) queueCap += this.queuedTrays[i].cap;
-            capLeft += hasOpenSame ? queueCap : emptyCap + queueCap;
+            capLeft += emptyCap + queueCap;
             if (remaining <= capLeft) continue;
             if (!first) first = kind;
             if (hasOpenSame && !onTray) onTray = kind;
@@ -325,7 +339,7 @@ export class BulkPurchaseState {
         return true;
     }
 
-    /** 半自动续放：当前目标不合法时，只补到已开且未满的同种格。 */
+    /** 已开且未满的同种格。 */
     debugFindContinueTrayIndex(item: FoodId): number {
         for (let i = 0; i < this.activeTrays.length; i++) {
             const tray = this.activeTrays[i];
@@ -335,19 +349,35 @@ export class BulkPurchaseState {
         return -1;
     }
 
-    debugResolveBagTopTrayIndex(col: number, preferredIndex: number | null): number {
-        if (preferredIndex != null && this.debugCanPlaceBagTopToTray(col, preferredIndex)) return preferredIndex;
-        const item = this.peekBag(col);
-        if (!item) return -1;
-        return this.debugFindContinueTrayIndex(item);
+    /** 从左到右第一个空格。同种未满时不开第二格。 */
+    debugFindEmptyTrayIndex(item: FoodId): number {
+        for (let i = 0; i < this.activeTrays.length; i++) {
+            const tray = this.activeTrays[i];
+            if (tray.sealed || tray.kind != null || tray.filled >= tray.cap) continue;
+            if (this.hasUnfilledKind(item, i)) return -1;
+            return i;
+        }
+        return -1;
     }
 
-    debugResolveCounterTrayIndex(counterIndex: number, preferredIndex: number | null): number {
-        if (preferredIndex != null && this.debugCounterCanPour(counterIndex, preferredIndex)) return preferredIndex;
+    /** 全自动：同种未满就续上，否则锁最左边的空格。 */
+    debugResolveAutoTrayIndex(item: FoodId): number {
+        const cont = this.debugFindContinueTrayIndex(item);
+        if (cont >= 0) return cont;
+        return this.debugFindEmptyTrayIndex(item);
+    }
+
+    debugResolveBagTopTrayIndex(col: number, _preferredIndex: number | null): number {
+        const item = this.peekBag(col);
+        if (!item) return -1;
+        return this.debugResolveAutoTrayIndex(item);
+    }
+
+    debugResolveCounterTrayIndex(counterIndex: number, _preferredIndex: number | null): number {
         const stack = this.counterStacks[counterIndex];
         const item = stack?.kind;
         if (!item || stack.count <= 0) return -1;
-        return this.debugFindContinueTrayIndex(item);
+        return this.debugResolveAutoTrayIndex(item);
     }
 
     /** 空格上同种已有未满格。继续收那一格不受这条款限制。 */
@@ -459,8 +489,9 @@ export class BulkPurchaseState {
         ensureBulkStageBags(this.runDef, index);
         const stage = this.runDef.stages[index];
         this.currentStage = index;
-        this.activeTrays = stage.trays.slice(0, OPEN_TRAY_COUNT).map((tray, trayIndex) => makeActiveTray(tray, trayIndex));
-        this.queuedTrays = cloneTrayDefs(stage.trays.slice(OPEN_TRAY_COUNT));
+        const open = openTrayCount(this.runDef);
+        this.activeTrays = stage.trays.slice(0, open).map((tray, trayIndex) => makeActiveTray(tray, trayIndex));
+        this.queuedTrays = cloneTrayDefs(stage.trays.slice(open));
         this.bags = cloneBags(stage.bags);
         this.receiptRemaining = cloneReceipt(stage.receipt);
         this.counterStacks = [];
@@ -491,11 +522,11 @@ export class BulkPurchaseState {
     }
 
     private refillCount(): number {
-        const queuedAtStart = Math.max(0, this.stageDef.trays.length - OPEN_TRAY_COUNT);
+        const queuedAtStart = Math.max(0, this.stageDef.trays.length - openTrayCount(this.runDef));
         return queuedAtStart - this.queuedTrays.length;
     }
 
-    /** 第三趟：已收件数到配置的 40%，或第一次补格，先到先记。只记一次。 */
+    /** 旧关若写了保底件数，第一次补格或收够时记一次。新关不写。 */
     private noteStageCheckpoint(): void {
         if (this.stageCheckpointLocked) return;
         const mark = this.stageDef.checkpointItems;

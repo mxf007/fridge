@@ -29,7 +29,7 @@ import { EDITOR, PREVIEW } from 'cc/env';
 import { BoardState } from './game/BoardState';
 import { packTrayGrid, TRAY_GAP, TRAY_WALL_H, TRAY_WALL_TOP, TRAY_WALL_W } from './game/levelLayout';
 import { albumStatusLine, noteAlbumWin, prepareAlbum, visibleAlbumGrade, winStepLine } from './game/AlbumState';
-import { CLEARED_KEY, MILESTONE_NS, milestoneKey, pullCloudProgress, pushCloudProgress } from './game/CloudSave';
+import { BULK_RUN_ID_KEY, CLEARED_KEY, MILESTONE_NS, milestoneKey, pullCloudProgress, pushCloudProgress } from './game/CloudSave';
 import { levelById as levelDefById, nextPlayable as nextPlayableLevel, PLAYABLE } from './game/playableLevels';
 import { visibleDesignSize } from './game/visibleDesignSize';
 import {
@@ -85,7 +85,7 @@ const Y_BUFFER = -524;
 const BULK_BAG_ZONE_Y = -300;
 const BULK_BAG_ZONE_H = 380;
 const BULK_FOOTER_Y = -614;
-/** 周末大采购上半区：2×2 大格 + 右小票，贴主线冰箱墙，不另铺大底板。 */
+/** 周末大采购上半区：4 格是 2×2，5 格是上 2 下 3。右小票不动。 */
 const BULK_TRAY_W = 180;
 const BULK_TRAY_H = 108;
 const BULK_TRAY_GAP_X = 26;
@@ -274,6 +274,20 @@ type FoodPress = {
     flyH: number;
 };
 
+/** 餐盘食物已经计入冰箱格之后的飞行贴图。重画时摘下，格子里先藏住。 */
+type FridgeFlyShot = {
+    fromWorld: Vec3;
+    flyW: number;
+    flyH: number;
+    frame: SpriteFrame | null;
+};
+
+type FridgeFlight = {
+    trayIndex: number;
+    itemIndex: number;
+    flyer: Node;
+};
+
 type BulkDragCtx = {
     card: Node;
     demo: BulkPurchaseState;
@@ -400,6 +414,10 @@ export class GameController extends Component {
     private holdShakeKind: FoodId | null = null;
     private revealBagCol: number | null = null;
     private lockedBagCol: number | null = null;
+    /** 已经计入冰箱、贴图还在飞。 */
+    private fridgeFlights: FridgeFlight[] = [];
+    /** 后一次落子作废前一次关门结束时的胜负收尾。 */
+    private moveSerial = 0;
     /** 第 1 关尚未通关时，第一下落子前指向栈顶。 */
     private l1Guide = false;
     /** 开局锁定的购物袋前后排；null = 一排。整关不随翻层重排。 */
@@ -723,6 +741,18 @@ export class GameController extends Component {
         if (layer) layer.destroy();
     }
 
+    private savedBulkRunId(): string | undefined {
+        const raw = sys.localStorage.getItem(BULK_RUN_ID_KEY) || '';
+        return raw || undefined;
+    }
+
+    private saveBulkRunId(runId: string): void {
+        if (!runId) return;
+        if (sys.localStorage.getItem(BULK_RUN_ID_KEY) === runId) return;
+        sys.localStorage.setItem(BULK_RUN_ID_KEY, runId);
+        void pushCloudProgress(sys.localStorage);
+    }
+
     private makeBulkPrototypeDemo(runDef: BulkRunDef, stageIndex = 0): BulkPurchaseState {
         const demo = BulkPurchaseState.fromRun(runDef);
         if (stageIndex > 0) demo.startStage(stageIndex);
@@ -732,11 +762,13 @@ export class GameController extends Component {
     }
 
     private openBulkPurchaseLayer(runId?: string, stageIndex = 0): void {
-        const proto = loadBulkPrototype(runId);
+        const targetRunId = runId || this.savedBulkRunId();
+        const proto = loadBulkPrototype(targetRunId);
         if (!proto) {
             this.showHomeToast('这一关还铺不出来');
             return;
         }
+        this.saveBulkRunId(proto.run.id);
         const stage = Math.max(0, Math.min(stageIndex, proto.run.stages.length - 1));
         let demo: BulkPurchaseState;
         try {
@@ -974,54 +1006,42 @@ export class GameController extends Component {
                 syncBagDemo();
             });
         };
+        const syncAfterBagPlace = (placedTray: number | null, sealed: boolean) => {
+            if (placedTray != null) {
+                const activeNow = demo.activeTrays[placedTray];
+                if (!activeNow || activeNow.sealed || activeNow.filled >= activeNow.cap) trayTargetIndex = null;
+                if (activeNow && activeNow.kind) this.bulkPulseTrayIndex = placedTray;
+                this.playBulkFridgeArrive(sealed);
+            }
+            syncTrayDemo();
+            if (counterPanel) this.syncBulkP4CounterDemo(counterPanel, demo, trayTargetIndex, bagTarget);
+            if (receipt) this.syncBulkP5ReceiptDemo(receipt, demo);
+            if (counterPanel) this.syncBulkP6FailDemo(counterPanel, demo);
+            syncBagDemo();
+            settleAfterMove();
+        };
         handleBagTap = (col: number) => {
             if (this.busy || this.bulkSettleLock) return;
             const item = demo.peekBag(col);
             if (!item) return;
             const from = this.findBulkBagTop(bagHost, col);
-            const selectedTrayIndex = trayTargetIndex;
-            const resolvedTrayIndex = bagTarget === 'tray'
-                ? demo.debugResolveBagTopTrayIndex(col, selectedTrayIndex)
-                : -1;
-            const commitBagPlace = () => {
-                const placedTray = bagTarget === 'tray' && resolvedTrayIndex >= 0 ? resolvedTrayIndex : null;
-                const slot = placedTray != null ? demo.activeTrays[placedTray] : null;
-                let ok = false;
-                if (bagTarget === 'tray') {
-                    if (placedTray == null) return;
-                    ok = demo.debugPlaceBagTopToTray(col, placedTray);
-                } else {
-                    ok = demo.debugPlaceBagTopToAnyCounter(col);
-                }
-                if (!ok) return;
-                if (placedTray != null) {
-                    const activeNow = demo.activeTrays[placedTray];
-                    if (!activeNow || activeNow.sealed || activeNow.filled >= activeNow.cap) trayTargetIndex = null;
-                    if (activeNow && activeNow.kind) this.bulkPulseTrayIndex = placedTray;
-                    if (slot) this.playBulkFridgeArrive(slot.sealed);
-                }
-                syncTrayDemo();
-                if (counterPanel) this.syncBulkP4CounterDemo(counterPanel, demo, trayTargetIndex, bagTarget);
-                if (receipt) this.syncBulkP5ReceiptDemo(receipt, demo);
-                if (counterPanel) this.syncBulkP6FailDemo(counterPanel, demo);
-                syncBagDemo();
-                settleAfterMove();
-            };
+            const fromWorld = from ? from.worldPosition.clone() : null;
             if (bagTarget === 'tray') {
+                const resolvedTrayIndex = demo.debugResolveBagTopTrayIndex(col, null);
                 if (resolvedTrayIndex < 0) {
-                    if (selectedTrayIndex == null) {
-                        this.showHomeToast('请先点一个可收的冰箱格');
-                        return;
-                    }
-                    this.showHomeToast(demo.debugRejectsNewTray(item, selectedTrayIndex)
-                        ? this.bulkAntiSplitToast(item)
-                        : '这件现在进不了当前目标格');
+                    this.showHomeToast('这件现在没有空格');
+                    return;
+                }
+                const to = this.bulkFridgeLandNode(board, resolvedTrayIndex);
+                const toWorld = to ? to.worldPosition.clone() : null;
+                const slot = demo.activeTrays[resolvedTrayIndex];
+                if (!demo.debugPlaceBagTopToTray(col, resolvedTrayIndex)) {
+                    this.showHomeToast('这件现在没有空格');
                     return;
                 }
                 trayTargetIndex = resolvedTrayIndex;
-                const to = this.bulkFridgeLandNode(board, resolvedTrayIndex);
-                if (from && to) this.flyBulkItem(card, from, to, item, { w: 48, h: 48 }, commitBagPlace, false);
-                else commitBagPlace();
+                syncAfterBagPlace(resolvedTrayIndex, !!slot && slot.sealed);
+                if (fromWorld && toWorld) this.flyBulkLoose(card, fromWorld, toWorld, item, { w: 48, h: 48 });
                 return;
             }
             const counterIndex = demo.debugFindBagTopCounterIndex(col);
@@ -1029,9 +1049,11 @@ export class GameController extends Component {
                 this.showHomeToast('这件现在进不了柜台同种叠或空位');
                 return;
             }
-            const to = counterPanel?.getChildByName(`Counter${counterIndex}`);
-            if (from && to) this.flyBulkItem(card, from, to, item, { w: BUF_FOOD, h: BUF_FOOD }, commitBagPlace, false);
-            else commitBagPlace();
+            const counterNode = counterPanel?.getChildByName(`Counter${counterIndex}`);
+            const toWorld = counterNode ? counterNode.worldPosition.clone() : null;
+            if (!demo.debugPlaceBagTopToAnyCounter(col)) return;
+            syncAfterBagPlace(null, false);
+            if (fromWorld && toWorld) this.flyBulkLoose(card, fromWorld, toWorld, item, { w: BUF_FOOD, h: BUF_FOOD });
         };
         this.bulkDragCtx = {
             card,
@@ -1110,6 +1132,7 @@ export class GameController extends Component {
             }
             this.bulkSettleLock = true;
             const nextRunId = nextBulkRunId(runId);
+            this.saveBulkRunId(nextRunId || runId);
             this.scheduleOnce(() => {
                 if (!layer.isValid) return;
                 this.spawnBulkWinCard(layer, demo.steps, protoIndex, nextRunId);
@@ -1143,7 +1166,7 @@ export class GameController extends Component {
         } else {
             const shell = card?.getChildByName('FridgeZone')?.getChildByName('TrayDemo');
             if (shell) {
-                for (let i = 0; i < 4; i++) {
+                for (let i = 0; i < 5; i++) {
                     const tray = shell.getChildByName(`BulkTray${i}`);
                     if (tray) targets.push(tray);
                 }
@@ -1432,13 +1455,16 @@ export class GameController extends Component {
         const shell = new Node('TrayDemo');
         shell.layer = UI_2D;
         parent.addChild(shell);
-        const positions = [
-            { x: BULK_TRAY_BLOCK_X - BULK_TRAY_DX, y: BULK_TRAY_DY },
-            { x: BULK_TRAY_BLOCK_X + BULK_TRAY_DX, y: BULK_TRAY_DY },
-            { x: BULK_TRAY_BLOCK_X - BULK_TRAY_DX, y: -BULK_TRAY_DY },
-            { x: BULK_TRAY_BLOCK_X + BULK_TRAY_DX, y: -BULK_TRAY_DY },
-        ];
-        for (let i = 0; i < 4; i++) {
+        const positions = this.bulkTraySlots(demo.activeTrays.length);
+        let centerX = 0;
+        let bottom = 0;
+        for (let i = 0; i < positions.length; i++) {
+            centerX += positions[i].x;
+            const edge = positions[i].y - positions[i].h / 2;
+            if (i === 0 || edge < bottom) bottom = edge;
+        }
+        if (positions.length > 0) centerX /= positions.length;
+        for (let i = 0; i < positions.length; i++) {
             const tray = demo.activeTrays[i];
             if (!tray) continue;
             const open = !tray.sealed && tray.filled < tray.cap;
@@ -1447,12 +1473,20 @@ export class GameController extends Component {
                 : i === selectedTrayIndex
                     ? 'selected'
                     : 'idle';
-            const node = this.addBulkP3TrayCard(shell, tray.cap, tray.filled, tray.kind || null, positions[i].x, positions[i].y, tone, i);
-            if (open) {
-                if (!node.getComponent(Button)) node.addComponent(Button);
-                this.bindHudPress(node, () => onSelectTray(i));
-            }
+            const spot = positions[i];
+            this.addBulkP3TrayCard(
+                shell,
+                tray.cap,
+                tray.filled,
+                tray.kind || null,
+                spot.x,
+                spot.y,
+                tone,
+                i,
+                demo.activeTrays.length > 4 ? { w: spot.w, h: spot.h } : undefined,
+            );
         }
+        void onSelectTray;
 
         const preview = demo.previewTrays();
         const showCount = Math.min(preview.length, Math.max(0, demo.stageDef.queuePreview));
@@ -1465,7 +1499,7 @@ export class GameController extends Component {
             const pillGap = 8;
             const captionGap = 10;
             const rowW = captionW + captionGap + showCount * pillW + (showCount - 1) * pillGap;
-            row.setPosition(BULK_TRAY_BLOCK_X, -BULK_TRAY_DY - BULK_TRAY_H / 2 - 16 - pillH / 2, 0);
+            row.setPosition(centerX, bottom - 16 - pillH / 2, 0);
             row.addComponent(UITransform).setContentSize(rowW, pillH);
             shell.addChild(row);
             const caption = this.addLabel(row, 'Caption', '收满后补进', 20, WALNUT, captionW, 28);
@@ -2013,44 +2047,30 @@ export class GameController extends Component {
         setTrayTargetIndex: (index: number | null) => void,
         clearTrayTarget: () => void,
     ): boolean {
-        if (!quiet && this.busy) return false;
-        const selectedTrayIndex = trayIndex;
-        const resolvedTrayIndex = demo.debugResolveCounterTrayIndex(counterIndex, selectedTrayIndex);
+        if (this.bulkSettleLock) return false;
+        void trayIndex;
+        const resolvedTrayIndex = demo.debugResolveCounterTrayIndex(counterIndex, null);
         if (resolvedTrayIndex < 0) {
-            if (!quiet) {
-                if (selectedTrayIndex == null) {
-                    this.showHomeToast('请先点一个可收的冰箱格');
-                    return false;
-                }
-                const kind = demo.counterStacks[counterIndex]?.kind;
-                this.showHomeToast(kind && demo.debugRejectsNewTray(kind, selectedTrayIndex)
-                    ? this.bulkAntiSplitToast(kind)
-                    : '这叠现在倒不进当前目标格');
-            }
+            if (!quiet) this.showHomeToast('这叠现在没有空格');
             return false;
         }
-        const activeTrayIndex = resolvedTrayIndex;
-        setTrayTargetIndex(activeTrayIndex);
-        const commit = (): boolean => {
-            const slot = demo.activeTrays[activeTrayIndex];
-            const ok = demo.debugPourOneFromCounter(counterIndex, activeTrayIndex);
-            if (!ok) return false;
-            const activeNow = demo.activeTrays[activeTrayIndex];
-            if (!activeNow || activeNow.sealed || activeNow.filled >= activeNow.cap) clearTrayTarget();
-            if (activeNow && activeNow.kind) this.bulkPulseTrayIndex = activeTrayIndex;
-            if (slot) this.playBulkFridgeArrive(slot.sealed);
-            extraSync();
-            this.syncBulkP5ReceiptDemo(receipt, demo);
-            this.syncBulkP6FailDemo(panel, demo);
-            return true;
-        };
-        if (quiet) return commit();
+        const slot = demo.activeTrays[resolvedTrayIndex];
         const item = demo.counterStacks[counterIndex]?.kind;
         const icon = panel.getChildByName(`Counter${counterIndex}`)?.getChildByName('Icon');
-        const tray = this.bulkFridgeLandNode(board, activeTrayIndex);
+        const tray = this.bulkFridgeLandNode(board, resolvedTrayIndex);
         const host = board.parent;
-        if (!item || !icon || !tray || !host) return commit();
-        this.flyBulkItem(host, icon, tray, item, { w: 48, h: 48 }, () => { commit(); }, false);
+        const fromWorld = icon ? icon.worldPosition.clone() : null;
+        const toWorld = tray ? tray.worldPosition.clone() : null;
+        if (!demo.debugPourOneFromCounter(counterIndex, resolvedTrayIndex)) return false;
+        setTrayTargetIndex(resolvedTrayIndex);
+        const activeNow = demo.activeTrays[resolvedTrayIndex];
+        if (!activeNow || activeNow.sealed || activeNow.filled >= activeNow.cap) clearTrayTarget();
+        if (activeNow && activeNow.kind) this.bulkPulseTrayIndex = resolvedTrayIndex;
+        if (slot) this.playBulkFridgeArrive(slot.sealed);
+        extraSync();
+        this.syncBulkP5ReceiptDemo(receipt, demo);
+        this.syncBulkP6FailDemo(panel, demo);
+        if (item && fromWorld && toWorld && host) this.flyBulkLoose(host, fromWorld, toWorld, item, { w: 48, h: 48 });
         return true;
     }
 
@@ -2102,6 +2122,33 @@ export class GameController extends Component {
             if (!host.isValid) return;
             onLand();
             if (playDrop) playFridgeDrop();
+        }, FLY_SEC);
+    }
+
+    /** 周末大采购连点：只画飞行，不占 busy，不等落地再点下一件。 */
+    private flyBulkLoose(
+        host: Node,
+        fromWorld: Vec3,
+        toWorld: Vec3,
+        item: FoodId,
+        endSize: { w: number; h: number },
+    ): void {
+        const hostUi = host.getComponent(UITransform);
+        if (!hostUi || !host.isValid) return;
+        const frame = this.frameForBag(item) || this.frameForFood(item);
+        if (!frame) return;
+        const fromPos = hostUi.convertToNodeSpaceAR(fromWorld);
+        const toPos = hostUi.convertToNodeSpaceAR(toWorld);
+        const startW = 72;
+        const startH = 96;
+        const flyer = this.addSprite(host, 'BulkFlyer', frame, startW, startH, fromPos.x, fromPos.y, Color.WHITE);
+        flyer.setSiblingIndex(host.children.length - 1);
+        const land = new Vec3(endSize.w / startW, endSize.h / startH, 1);
+        tween(flyer)
+            .to(FLY_SEC, { position: toPos, scale: land }, { easing: easing.cubicOut })
+            .start();
+        this.scheduleOnce(() => {
+            if (flyer.isValid) flyer.destroy();
         }, FLY_SEC);
     }
 
@@ -2490,10 +2537,10 @@ export class GameController extends Component {
         this.scheduleOnce(() => {
             if (kind === 'locked_out') {
                 const resolved = demo.debugResolveLockedOut();
-                this.showHomeToast(resolved === 'branch' ? '这格锁错了，退回最近可解分叉' : '这格锁错了，退回本趟开头');
+                this.showHomeToast(resolved === 'branch' ? '这格锁错了，退回最近可解分叉' : '这格锁错了，重开本关');
             } else {
                 const resolved = demo.debugResolveBufferFull();
-                this.showHomeToast(resolved === 'checkpoint' ? '柜台堆满了，退回本趟保底点' : '柜台堆满了，重开本趟');
+                this.showHomeToast(resolved === 'checkpoint' ? '柜台堆满了，重开本关' : '柜台堆满了，重开本关');
             }
             extraSync();
             this.syncBulkP4CounterDemo(panel, demo, getTrayTargetIndex(), 'tray');
@@ -2604,7 +2651,7 @@ export class GameController extends Component {
         const ready = demo.isStageResolved();
         if (titleLabel) titleLabel.string = '';
         if (statusLabel) {
-            statusLabel.string = ready ? '本趟已收好' : '本趟未完成';
+            statusLabel.string = ready ? '本关已收好' : '本关未完成';
             statusLabel.color = ready ? new Color(210, 232, 196, 255) : MILK;
         }
     }
@@ -2613,10 +2660,10 @@ export class GameController extends Component {
         const old = parent.getChildByName('BulkGuideLayer');
         if (old) old.destroy();
         const tips = [
-            '这是大容量格，看 0/12 这种数字，不看小坑位。',
+            '点餐盘上的食物会飞进同种格。冰箱里还没有这种，就锁最左边的空格。',
             '格子收满会搬走，下面「收满后补进」会换上新格。',
-            '柜台 1 格能叠同种，短按 +1，长按会连续倒入。',
-            '购物小票只记还没进冰箱的件数，不是可操作区。',
+            '柜台可以先压住不想马上锁的食物。短按 +1，长按连续倒进冰箱。',
+            '看小票件数。最左边那格的容量，要和先点的那种对上。',
         ];
         let index = 0;
         const layer = new Node('BulkGuideLayer');
@@ -2674,6 +2721,37 @@ export class GameController extends Component {
         sync();
     }
 
+    private bulkTraySlots(count: number): { x: number; y: number; w: number; h: number }[] {
+        if (count <= 4) {
+            const w = BULK_TRAY_W;
+            const h = BULK_TRAY_H;
+            const ox = BULK_TRAY_BLOCK_X;
+            return [
+                { x: ox - BULK_TRAY_DX, y: BULK_TRAY_DY, w, h },
+                { x: ox + BULK_TRAY_DX, y: BULK_TRAY_DY, w, h },
+                { x: ox - BULK_TRAY_DX, y: -BULK_TRAY_DY, w, h },
+                { x: ox + BULK_TRAY_DX, y: -BULK_TRAY_DY, w, h },
+            ].slice(0, Math.max(0, count));
+        }
+        const w = 148;
+        const h = 96;
+        const gapX = 14;
+        const gapY = 16;
+        const ox = -118;
+        const topY = (h + gapY) / 2;
+        const botY = -topY;
+        const topDx = (w + gapX) / 2;
+        const step = w + gapX;
+        const botLeft = ox - step;
+        return [
+            { x: ox - topDx, y: topY, w, h },
+            { x: ox + topDx, y: topY, w, h },
+            { x: botLeft, y: botY, w, h },
+            { x: botLeft + step, y: botY, w, h },
+            { x: botLeft + step * 2, y: botY, w, h },
+        ];
+    }
+
     private addBulkP3TrayCard(
         parent: Node,
         cap: number,
@@ -2683,12 +2761,13 @@ export class GameController extends Component {
         y: number,
         tone: 'selected' | 'receivable' | 'idle' | 'blocked',
         index: number,
+        size?: { w: number; h: number },
     ): Node {
         const node = new Node(`BulkTray${index}`);
         node.layer = UI_2D;
         node.setPosition(x, y, 0);
-        const outerW = BULK_TRAY_W;
-        const outerH = BULK_TRAY_H;
+        const outerW = size ? size.w : BULK_TRAY_W;
+        const outerH = size ? size.h : BULK_TRAY_H;
         const frame = 12;
         const slotW = outerW - frame * 2;
         const slotH = outerH - frame * 2;
@@ -2717,18 +2796,19 @@ export class GameController extends Component {
         node.addChild(gNode);
         if (selected && !closed) this.drawCoralFramePulse(node, outerW, outerH, 4, 16, SELECT_PULSE_ICE, SELECT_PULSE_ICE_SOFT);
 
+        const iconSize = size ? 40 : 48;
         const foodSlot = new Node('FoodSlot');
         foodSlot.layer = UI_2D;
-        foodSlot.setPosition(-48, 2, 0);
-        foodSlot.addComponent(UITransform).setContentSize(48, 48);
+        foodSlot.setPosition(size ? -34 : -48, 2, 0);
+        foodSlot.addComponent(UITransform).setContentSize(iconSize, iconSize);
         node.addChild(foodSlot);
         const iconFrame = kind ? this.frameForBag(kind) : null;
         if (iconFrame) {
-            this.addSprite(foodSlot, 'Icon', iconFrame, 48, 48, 0, 0, Color.WHITE);
+            this.addSprite(foodSlot, 'Icon', iconFrame, iconSize, iconSize, 0, 0, Color.WHITE);
         }
 
-        const count = this.addLabel(node, 'Count', `${filled}/${cap}`, 32, WALNUT, 100, 40);
-        count.setPosition(24, 4, 0);
+        const count = this.addLabel(node, 'Count', `${filled}/${cap}`, size ? 26 : 32, WALNUT, size ? 80 : 100, 40);
+        count.setPosition(size ? 20 : 24, 4, 0);
         this.tuneLabel(count, true);
 
         const progressBg = new Node('ProgressBg');
@@ -3812,6 +3892,7 @@ export class GameController extends Component {
     private presentLevel(level: LevelDef) {
         this.unscheduleAllCallbacks();
         this.clearFoodPress();
+        this.clearFridgeFlights();
         this.closeSettingsLayer();
         for (let i = 0; i < HOME_NODES.length; i++) {
             const n = this.node.getChildByName(HOME_NODES[i]);
@@ -3894,6 +3975,7 @@ export class GameController extends Component {
         const root = this.playRoot;
         const board = this.board;
         if (!root || !board) return;
+        this.parkFridgeFlights();
         // destroyAllChildren 本帧末才真正销毁；先 detach 避免旧 BufferBoard 继续吃触摸。
         const stale = root.children.slice();
         for (let i = 0; i < stale.length; i++) {
@@ -3927,6 +4009,7 @@ export class GameController extends Component {
                 this.addLabel(root, 'WinTitle', '完美收纳！', 40, new Color(248, 240, 220, 255), 640, 80).setPosition(0, 80, 0);
             }
         }
+        this.restoreFridgeFlights();
     }
 
     private drawHud(parent: Node) {
@@ -4156,6 +4239,7 @@ export class GameController extends Component {
 
     private goHome() {
         this.unscheduleAllCallbacks();
+        this.clearFridgeFlights();
         this.busy = false;
         this.levelFailed = false;
         this.holdWin = false;
@@ -5801,6 +5885,10 @@ export class GameController extends Component {
         if ((press.item === 'milk' || press.item === 'sauce') && dest.kind === 'tray' && flyer) {
             this.syncFridgeBottleFlyer(press.item, dest.index, flyer, press);
         }
+        if (dest.kind === 'tray' && board) {
+            this.releaseDragIntoFridge(press, dest);
+            return;
+        }
         const landing = this.placeLanding(press.item, dest, press.flyW, press.flyH);
         const finish = () => {
             if (token !== this.foodPressToken) return;
@@ -6090,7 +6178,13 @@ export class GameController extends Component {
     }
 
     /** 飞入落点。scale 乘上飞行图的宽高后等于格子里的成品尺寸。 */
-    private placeLanding(item: FoodId, dest: Dest, flyW: number, flyH: number): { to: Vec3; scale: Vec3 } | null {
+    private placeLanding(
+        item: FoodId,
+        dest: Dest,
+        flyW: number,
+        flyH: number,
+        itemIndex?: number,
+    ): { to: Vec3; scale: Vec3 } | null {
         const board = this.board;
         const root = this.playRoot;
         const ui = root ? root.getComponent(UITransform) : null;
@@ -6108,7 +6202,8 @@ export class GameController extends Component {
         const tray = board.trays[dest.index];
         if (!trayUi || !tray) return null;
         const m = this.trayAt(dest.index);
-        const seat = this.seatBox(m.slotW, m.slotH, tray.cap, tray.items.length, m.horizontal);
+        const seatIndex = itemIndex != null ? itemIndex : tray.items.length;
+        const seat = this.seatBox(m.slotW, m.slotH, tray.cap, seatIndex, m.horizontal);
         const to = ui.convertToNodeSpaceAR(trayUi.convertToWorldSpaceAR(new Vec3(seat.x, seat.y, 0)));
         const size = this.trayItemDrawSize(item, m.horizontal, seat);
         return { to, scale: new Vec3(size.w / flyW, size.h / flyH, 1) };
@@ -6133,6 +6228,156 @@ export class GameController extends Component {
         node.setSiblingIndex(root.children.length - 1);
     }
 
+    /** 拖进冰箱：格子马上计入，飞行不挡下一件。 */
+    private releaseDragIntoFridge(press: FoodPress, dest: Dest) {
+        const board = this.board;
+        if (!board || dest.kind !== 'tray') return;
+        const itemIndex = board.trays[dest.index].items.length;
+        const shot = this.shotFromGhost(press);
+        if (press.ghost && press.ghost.isValid) press.ghost.destroy();
+        const placed = press.source.kind === 'bag'
+            ? this.commitPlace(press.source.col, shot != null)
+            : this.commitPlaceFromBuffer(press.source.index, shot != null);
+        if (placed && shot) this.launchFridgeFlight(press.item, dest.index, itemIndex, shot);
+    }
+
+    private shotFromGhost(press: FoodPress): FridgeFlyShot | null {
+        const ghost = press.ghost;
+        if (!ghost || !ghost.isValid) return null;
+        const flyer = press.flyer;
+        const sp = flyer && flyer.isValid ? flyer.getComponent(Sprite) : null;
+        return {
+            fromWorld: ghost.worldPosition.clone(),
+            flyW: press.flyW,
+            flyH: press.flyH,
+            frame: sp && sp.spriteFrame ? sp.spriteFrame : this.frameForFood(press.item),
+        };
+    }
+
+    /** 记下餐盘上的起飞位置。必须在落子重画之前调用。 */
+    private captureBagFlight(col: number, item: FoodId, dest: Dest): FridgeFlyShot | null {
+        const root = this.playRoot;
+        const board = this.board;
+        if (!root || !board || dest.kind !== 'tray') return null;
+        const bagNode = root.getChildByName(`Bag${col}`);
+        const top = bagNode ? bagNode.getChildByName(`T${board.bags[col].length - 1}`) : null;
+        if (!top) return null;
+        const foodNode = top.getChildByName('Food');
+        const fromNode = foodNode || top;
+        const fromUi = fromNode.getComponent(UITransform);
+        const fromScale = fromNode.worldScale;
+        let flyW = fromUi ? fromUi.contentSize.width * Math.abs(fromScale.x) : 72;
+        let flyH = fromUi ? fromUi.contentSize.height * Math.abs(fromScale.y) : 96;
+        const flyVisual = this.prepFridgeFlyVisual(item, dest, flyW, flyH);
+        return {
+            fromWorld: fromNode.worldPosition.clone(),
+            flyW: flyVisual.flyW,
+            flyH: flyVisual.flyH,
+            frame: flyVisual.frame,
+        };
+    }
+
+    /** 食物已经在格子里。贴图飞过去，落地再出现。 */
+    private launchFridgeFlight(item: FoodId, trayIndex: number, itemIndex: number, shot: FridgeFlyShot) {
+        const root = this.playRoot;
+        const ui = root ? root.getComponent(UITransform) : null;
+        const reveal = () => {
+            const food = this.showTrayFood(trayIndex, itemIndex);
+            if (food) this.squashFoodNode(food);
+            playFridgeDrop();
+        };
+        if (!root || !ui) {
+            reveal();
+            return;
+        }
+        const landing = this.placeLanding(item, { kind: 'tray', index: trayIndex }, shot.flyW, shot.flyH, itemIndex);
+        if (!landing) {
+            reveal();
+            return;
+        }
+        const from = ui.convertToNodeSpaceAR(shot.fromWorld);
+        const flyer = this.addSprite(root, 'Flyer', shot.frame, shot.flyW, shot.flyH, from.x, from.y, Color.WHITE);
+        this.placeBelowHud(flyer);
+        this.hideTrayFood(trayIndex, itemIndex);
+        const flight: FridgeFlight = { trayIndex, itemIndex, flyer };
+        this.fridgeFlights.push(flight);
+        tween(flyer)
+            .to(FLY_SEC, { position: landing.to }, { easing: easing.cubicOut })
+            .start();
+        tween(flyer)
+            .to(FLY_SEC, { scale: landing.scale }, { easing: easing.linear })
+            .start();
+        this.scheduleOnce(() => {
+            const idx = this.fridgeFlights.indexOf(flight);
+            if (idx >= 0) this.fridgeFlights.splice(idx, 1);
+            if (flyer.isValid) flyer.destroy();
+            if (!this.playRoot || !this.playRoot.isValid || !this.board) return;
+            reveal();
+        }, FLY_SEC);
+    }
+
+    private parkFridgeFlights() {
+        const root = this.playRoot;
+        if (!root) return;
+        for (let i = 0; i < this.fridgeFlights.length; i++) {
+            const flyer = this.fridgeFlights[i].flyer;
+            if (flyer.isValid && flyer.parent === root) flyer.removeFromParent();
+        }
+    }
+
+    private restoreFridgeFlights() {
+        const root = this.playRoot;
+        if (!root) return;
+        const alive: FridgeFlight[] = [];
+        for (let i = 0; i < this.fridgeFlights.length; i++) {
+            const flight = this.fridgeFlights[i];
+            if (!flight.flyer.isValid) continue;
+            if (flight.flyer.parent !== root) root.addChild(flight.flyer);
+            this.placeBelowHud(flight.flyer);
+            this.hideTrayFood(flight.trayIndex, flight.itemIndex);
+            alive.push(flight);
+        }
+        this.fridgeFlights = alive;
+    }
+
+    private clearFridgeFlights() {
+        for (let i = 0; i < this.fridgeFlights.length; i++) {
+            const flyer = this.fridgeFlights[i].flyer;
+            if (flyer.isValid) flyer.destroy();
+        }
+        this.fridgeFlights = [];
+    }
+
+    private trayFoodNode(trayIndex: number, itemIndex: number): Node | null {
+        const root = this.playRoot;
+        if (!root) return null;
+        const tray = this.newestNamed(root, `Tray${trayIndex}`);
+        return tray ? tray.getChildByName(`Food${itemIndex}`) : null;
+    }
+
+    private hideTrayFood(trayIndex: number, itemIndex: number) {
+        const food = this.trayFoodNode(trayIndex, itemIndex);
+        if (!food) return;
+        const op = food.getComponent(UIOpacity) || food.addComponent(UIOpacity);
+        op.opacity = 0;
+    }
+
+    private showTrayFood(trayIndex: number, itemIndex: number): Node | null {
+        const food = this.trayFoodNode(trayIndex, itemIndex);
+        if (!food) return null;
+        const op = food.getComponent(UIOpacity);
+        if (op) op.opacity = 255;
+        return food;
+    }
+
+    /** 计入冰箱之后可以再点。胜负仍然锁住。 */
+    private noteMoveBusy(win: boolean) {
+        const board = this.board;
+        const failed = !win && !!board && !!board.failReason();
+        if (win || failed) this.busy = true;
+        else this.busy = false;
+    }
+
     private onBagTap(col: number, isTop: boolean) {
         const board = this.board;
         const root = this.playRoot;
@@ -6149,6 +6394,15 @@ export class GameController extends Component {
             const result = board.placeFromBag(col);
             if (!result.ok) this.showPlaceFail(result as PlaceFail);
             this.shakeBagTop(col);
+            return;
+        }
+
+        const toFridge = activeDest != null && activeDest.kind === 'tray';
+        if (toFridge) {
+            const itemIndex = board.trays[activeDest.index].items.length;
+            const shot = this.captureBagFlight(col, item, activeDest);
+            const placed = this.commitPlace(col, shot != null);
+            if (placed && shot) this.launchFridgeFlight(item, activeDest.index, itemIndex, shot);
             return;
         }
 
@@ -6253,12 +6507,12 @@ export class GameController extends Component {
         }, FLY_SEC);
     }
 
-    private commitPlaceFromBuffer(index: number) {
+    private commitPlaceFromBuffer(index: number, holdArrival = false): boolean {
         const board = this.board;
         const root = this.playRoot;
         if (!board || !root) {
             this.busy = false;
-            return;
+            return false;
         }
         const result = board.placeFromBuffer(index);
         if (!result.ok) {
@@ -6268,29 +6522,22 @@ export class GameController extends Component {
             this.render();
             this.showPlaceFail(fail);
             this.playSizeFeedback();
-            return;
+            return false;
         }
         this.holdHint = null;
         this.holdHintBuffers = [];
         this.noteSizeTeach(result.item, result.dest);
         const win = board.isWin();
-        this.animateDoorIndex = result.sealed && result.dest.kind === 'tray' ? result.dest.index : null;
-        this.holdWin = win;
-        this.clearDropHalo();
-        this.render();
-        if (result.dest.kind === 'tray') playFridgeDrop();
-        const doorPlayed = result.sealed && result.dest.kind === 'tray' && this.playDoorClose(result.dest.index, win);
-        if (!doorPlayed) this.animateDoorIndex = null;
-        this.squashLanded(result.dest);
-        if (!doorPlayed) this.finishMove(win);
+        this.finishCommittedMove(result.dest, result.sealed, win, holdArrival);
+        return true;
     }
 
-    private commitPlace(col: number) {
+    private commitPlace(col: number, holdArrival = false): boolean {
         const board = this.board;
         const root = this.playRoot;
         if (!board || !root) {
             this.busy = false;
-            return;
+            return false;
         }
         const result = board.placeFromBag(col);
         if (!result.ok) {
@@ -6300,29 +6547,33 @@ export class GameController extends Component {
             this.render();
             this.showPlaceFail(fail);
             this.playSizeFeedback();
-            return;
+            return false;
         }
         this.holdHint = null;
         this.holdHintBuffers = [];
         this.l1Guide = false;
         this.revealBagCol = board.bags[col].length > 0 ? col : null;
-        if (this.revealBagCol != null) {
-            const locked = this.revealBagCol;
-            this.lockedBagCol = locked;
-            this.scheduleOnce(() => {
-                if (this.lockedBagCol === locked) this.lockedBagCol = null;
-            }, 0.18);
-        }
+        this.lockedBagCol = null;
         this.noteSizeTeach(result.item, result.dest);
         const win = board.isWin();
-        this.animateDoorIndex = result.sealed && result.dest.kind === 'tray' ? result.dest.index : null;
+        this.finishCommittedMove(result.dest, result.sealed, win, holdArrival);
+        return true;
+    }
+
+    /** 落子已经写进棋盘。进了冰箱格就放开点击；贴图还在飞时先不播落地。 */
+    private finishCommittedMove(dest: Dest, sealed: boolean, win: boolean, holdArrival: boolean) {
+        this.moveSerial += 1;
+        const intoFridge = dest.kind === 'tray';
+        if (intoFridge) this.noteMoveBusy(win);
+        this.animateDoorIndex = sealed && intoFridge ? dest.index : null;
         this.holdWin = win;
         this.clearDropHalo();
         this.render();
-        if (result.dest.kind === 'tray') playFridgeDrop();
-        const doorPlayed = result.sealed && result.dest.kind === 'tray' && this.playDoorClose(result.dest.index, win);
+        const showNow = !holdArrival || !intoFridge;
+        if (showNow && intoFridge) playFridgeDrop();
+        const doorPlayed = sealed && intoFridge && this.playDoorClose(dest.index, win);
         if (!doorPlayed) this.animateDoorIndex = null;
-        this.squashLanded(result.dest);
+        if (showNow) this.squashLanded(dest);
         if (!doorPlayed) this.finishMove(win);
     }
 
@@ -6336,6 +6587,7 @@ export class GameController extends Component {
         if (!door || !tray || !doorUi) return false;
         const slotW = doorUi.contentSize.width;
         const slotH = doorUi.contentSize.height;
+        const serial = this.moveSerial;
         playTrayDoorClose();
         playTrayDoorVibration();
         tween(door)
@@ -6347,6 +6599,7 @@ export class GameController extends Component {
         tween(door)
             .to(DOOR_SEC, { scale: new Vec3(1, 1, 1) }, { easing: easing.cubicOut })
             .call(() => {
+                if (serial !== this.moveSerial) return;
                 this.animateDoorIndex = null;
                 if (door.isValid) {
                     this.spawnSeamPuff(door, slotW, slotH);
@@ -6426,6 +6679,10 @@ export class GameController extends Component {
             food = slot ? slot.getChildByName('Food') : null;
         }
         if (!food) return;
+        this.squashFoodNode(food);
+    }
+
+    private squashFoodNode(food: Node) {
         const sx = food.scale.x;
         const sy = food.scale.y;
         tween(food)

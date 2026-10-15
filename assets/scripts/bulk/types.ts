@@ -11,7 +11,7 @@ export type BulkStageDef = {
     queuePreview: number;
     bags: FoodId[][];
     receipt: Partial<Record<FoodId, number>>;
-    /** 第三趟保底：冰箱已收件数达到这个数就记下。前两趟不写。 */
+    /** 旧的趟内保底。一关不再分趟，新关不写。 */
     checkpointItems?: number;
     /** 这趟的对格意图，给测试看，不参与落子。 */
     plan?: string;
@@ -23,6 +23,8 @@ export type BulkRunDef = {
     unlockCleared: number;
     counterSlots: number;
     bufferStackCap: number;
+    /** 开局上台的冰箱格。1–16 关是 4，17 关起是 5。 */
+    openTrays: number;
     stages: BulkStageDef[];
     /** 利落余量 = 最深列 − 1。完美步数还要等求解器。 */
     tidySlack?: number;
@@ -57,7 +59,7 @@ export type BulkRunSave = {
     stageCheckpoint: BulkStageSnapshot | null;
     branchCheckpoint: BulkStageSnapshot | null;
     current: BulkStageSnapshot;
-    /** 第三趟保底已经写过，就不再往后覆盖。 */
+    /** 旧档的保底标记。新关不写保底。 */
     stageCheckpointLocked?: boolean;
 };
 
@@ -129,9 +131,10 @@ export function assertBulkRunDef(run: BulkRunDef): void {
     if (!run.id) throw new Error('bulk run missing id');
     if (run.counterSlots <= 0) throw new Error(`${run.id} counterSlots<=0`);
     if (run.bufferStackCap <= 0) throw new Error(`${run.id} bufferStackCap<=0`);
+    if (run.openTrays < 4 || run.openTrays > 5) throw new Error(`${run.id} openTrays`);
     if (run.stages.length === 0) throw new Error(`${run.id} no stages`);
     for (let i = 0; i < run.stages.length; i++) {
         if (run.stages[i].bags.length === 0) continue;
-        assertBulkStageDef(run.stages[i]);
+        assertBulkStageDef(run.stages[i], run.openTrays);
     }
 }

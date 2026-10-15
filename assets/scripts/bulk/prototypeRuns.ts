@@ -57,7 +57,7 @@ export function nextBulkRunId(runId: string): string | undefined {
 /** 只在点进这一关时铺袋。启动和主页不要调。 */
 export function loadBulkPrototype(runId?: string): BulkPrototypeDef | null {
     const config = runId
-        ? BULK_LEVEL_CONFIGS.find((item) => item.id === runId) || null
+        ? BULK_LEVEL_CONFIGS.find((item) => item.id === runId) || BULK_LEVEL_CONFIGS[0] || null
         : BULK_LEVEL_CONFIGS[0] || null;
     if (!config) return null;
     const cached = protoCache.get(config.id);

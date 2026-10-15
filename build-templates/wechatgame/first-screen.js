@@ -2,6 +2,25 @@
  * 微信首屏：不显示 Cocos logo，用产品 Cream 铺满 canvas，避免去掉闪屏后黑屏。
  * 与 GameScene 相机清屏色 #F6EFE6 一致。
  */
+
+// 模拟器用户目录里还没有 cacheList.json 时，引擎会打一行 Read json failed。
+// 只丢掉这一条；不去列 http://usr，避免开发者工具 Timeout。
+(function silenceMissingCacheListWarn() {
+    if (typeof console === 'undefined' || typeof console.warn !== 'function' || console.warn.__fridgeCacheList) return;
+    const warn = console.warn.bind(console);
+    function wrapped() {
+        const text = Array.prototype.join.call(arguments, ' ');
+        if (text.indexOf('Read json failed') !== -1
+            && text.indexOf('cacheList.json') !== -1
+            && text.indexOf('no such file') !== -1) {
+            return;
+        }
+        return warn.apply(console, arguments);
+    }
+    wrapped.__fridgeCacheList = true;
+    console.warn = wrapped;
+})();
+
 const CREAM = [246 / 255, 239 / 255, 230 / 255, 1];
 
 const options = {

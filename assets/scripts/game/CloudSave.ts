@@ -2,12 +2,13 @@
  * 今晚冰箱进度的云端文档。一条记录一个玩家（云开发按 _openid 隔离）。
  *
  * 集合名 saves。控制台权限用「仅创建者可读写」。
- * 字段：cleared、album（首通步数、最佳步数、首通格子种类）、milestones。
+ * 字段：cleared、album（首通步数、最佳步数、首通格子种类）、milestones、mergeBestScore。
  * 本机先写。云端回来后取更高关卡、更少步数；空云档不覆盖本机。
- * 音效、震动、残局不进这份文档。
+ * 音效、震动、大果盘残局不进这份文档。
  */
 import { readAlbum, writeAlbum } from './AlbumState';
 import type { AlbumEntry, AlbumFile, AlbumGrade, AlbumKv } from './AlbumState';
+import { readMergeBest, writeMergeBest } from '../merge/MergeSave';
 import { CLOUD_ENV_ID } from './cloudEnv';
 import type { FoodId } from './types';
 import { FOOD_IDS } from './types';
@@ -26,6 +27,7 @@ export type ProgressFile = {
     bulkRunId: string;
     album: AlbumFile;
     milestones: MilestoneFlags;
+    mergeBestScore: number;
 };
 
 type CloudDoc = Record<string, unknown> & { _id?: string };
@@ -75,6 +77,7 @@ export function emptyProgress(): ProgressFile {
         bulkRunId: '',
         album: { entries: {} },
         milestones: { 10: false, 20: false, 30: false },
+        mergeBestScore: 0,
     };
 }
 
@@ -88,13 +91,14 @@ export function readProgress(kv: AlbumKv): ProgressFile {
         const n = MILESTONE_NS[i];
         milestones[n] = kv.getItem(milestoneKey(n)) === '1';
     }
-    return { cleared, bulkRunId, album: readAlbum(kv), milestones };
+    return { cleared, bulkRunId, album: readAlbum(kv), milestones, mergeBestScore: readMergeBest(kv) };
 }
 
 export function writeProgress(kv: AlbumKv, file: ProgressFile): void {
     kv.setItem(CLEARED_KEY, file.cleared > 0 ? String(file.cleared) : '0');
     kv.setItem(BULK_RUN_ID_KEY, sanitizeBulkRunId(file.bulkRunId));
     writeAlbum(kv, file.album);
+    writeMergeBest(kv, file.mergeBestScore);
     for (let i = 0; i < MILESTONE_NS.length; i++) {
         const n = MILESTONE_NS[i];
         if (file.milestones[n]) kv.setItem(milestoneKey(n), '1');
@@ -110,6 +114,7 @@ export function progressFromCloud(data: unknown): ProgressFile | null {
         bulkRunId: sanitizeBulkRunId(src.bulkRunId),
         album: albumFromCloud(src.album),
         milestones: flagsFromCloud(src.milestones),
+        mergeBestScore: clampMergeBestScore(src.mergeBestScore),
     };
 }
 
@@ -140,6 +145,7 @@ export function mergeProgress(local: ProgressFile, remote: ProgressFile): Progre
             20: local.milestones[20] || remote.milestones[20],
             30: local.milestones[30] || remote.milestones[30],
         },
+        mergeBestScore: Math.max(local.mergeBestScore, remote.mergeBestScore),
     };
 }
 
@@ -163,6 +169,7 @@ export function canonProgress(file: ProgressFile): string {
             20: !!file.milestones[20],
             30: !!file.milestones[30],
         },
+        mergeBestScore: clampMergeBestScore(file.mergeBestScore),
         entries,
     });
 }
@@ -288,6 +295,7 @@ function cloudBody(file: ProgressFile): Record<string, unknown> {
         album: {
             entries: file.album.entries,
         },
+        mergeBestScore: clampMergeBestScore(file.mergeBestScore),
         updatedAt: Date.now(),
     };
 }
@@ -400,6 +408,12 @@ function clampCleared(value: unknown): number {
     const n = typeof value === 'number' ? value : typeof value === 'string' ? parseInt(value, 10) : NaN;
     if (!Number.isFinite(n) || n <= 0) return 0;
     return Math.min(200, Math.floor(n));
+}
+
+function clampMergeBestScore(value: unknown): number {
+    const n = typeof value === 'number' ? value : typeof value === 'string' ? parseInt(value, 10) : NaN;
+    if (!Number.isFinite(n) || n <= 0) return 0;
+    return Math.min(99999999, Math.floor(n));
 }
 
 function sanitizeBulkRunId(value: unknown): string {

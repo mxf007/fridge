@@ -8,8 +8,10 @@ import {
     Component,
     EventTouch,
     ERigidBody2DType,
+    Game,
     director,
     Director,
+    game,
     Graphics,
     Input,
     Label,
@@ -31,7 +33,9 @@ import {
     instantiate,
 } from 'cc';
 import { MergeBall } from './MergeBall';
+import { clearMergeSnapshot, readMergeBest, readMergeSnapshot, type MergeSnapshot, writeMergeBest, writeMergeSnapshot } from './MergeSave';
 import { playMergeSfx } from './MergeSfx';
+import { pushCloudProgress } from '../game/CloudSave';
 import { visibleDesignSize } from '../game/visibleDesignSize';
 import { prefetchShareScreenshot, setSharePayload, shareFromUserTap } from '../game/Share';
 
@@ -48,7 +52,6 @@ const BOARD_TOP = BOARD_BOTTOM + BOARD_H;
 const FAIL_Y = BOARD_TOP - 75;
 const DROP_Y = BOARD_TOP + 40;
 const WALL = 24;
-const BEST_KEY = 'fridge_merge_best_score';
 /** HUD 行中心到各控件下缘（设计像素），用于和框顶 clamp。 */
 const HOME_BTN_EXTENT_BELOW = 44;
 const SCORE_SHELF_EXTENT_BELOW = 42;
@@ -73,6 +76,7 @@ const TITLE_TAG_GAP = 12;
 const CREAM = new Color(246, 239, 230, 255);
 const WALNUT = new Color(107, 74, 58, 255);
 const FRAME = new Color(176, 130, 96, 255);
+const BOARD_FRAME = new Color(156, 110, 78, 255);
 const MILK = new Color(255, 253, 248, 255);
 const CORAL = new Color(224, 122, 95, 255);
 const SAGE = new Color(122, 158, 126, 255);
@@ -116,6 +120,7 @@ export class MergeGameController extends Component {
     private inputLocked = false;
     private gameOver = false;
     private overflowSince = 0;
+    private rngState = 0;
     private fruitFrames = new Map<string, SpriteFrame>();
     private burstFrame: SpriteFrame | null = null;
     private bgSprite: Sprite | null = null;
@@ -131,9 +136,10 @@ export class MergeGameController extends Component {
 
     open(onClose: () => void): void {
         this.closeCallback = onClose;
-        this.best = Number(sys.localStorage.getItem(BEST_KEY) || 0) || 0;
+        this.best = readMergeBest(sys.localStorage);
         this.buildView();
-        this.startRound();
+        if (!this.restoreSavedRound()) this.startRound();
+        game.on(Game.EVENT_HIDE, this.onAppHide, this);
         resources.load('merge/MergeHud', Prefab, (error, prefab) => {
             if (!this.node?.isValid) return;
             if (!error && prefab) this.applyHudPrefab(prefab);
@@ -148,6 +154,7 @@ export class MergeGameController extends Component {
         this.node.off(Input.EventType.TOUCH_END, this.onTouchEnd, this);
         this.node.off(Input.EventType.TOUCH_CANCEL, this.onTouchCancel, this);
         director.off(Director.EVENT_AFTER_PHYSICS, this.syncFruitViews, this);
+        game.off(Game.EVENT_HIDE, this.onAppHide, this);
         this.unscheduleAllCallbacks();
     }
 
@@ -451,8 +458,8 @@ export class MergeGameController extends Component {
         g.fillColor = new Color(255, 253, 248, 28);
         g.roundRect(-BOARD_W / 2 + 10, -BOARD_H / 2 + 10, BOARD_W - 20, BOARD_H - 20, 18);
         g.fill();
-        g.strokeColor = FRAME;
-        g.lineWidth = 6;
+        g.strokeColor = BOARD_FRAME;
+        g.lineWidth = 8;
         g.roundRect(-BOARD_W / 2, -BOARD_H / 2, BOARD_W, BOARD_H, 22);
         g.stroke();
 
@@ -507,6 +514,7 @@ export class MergeGameController extends Component {
     private closeMerge(): void {
         const done = this.closeCallback;
         this.closeCallback = null;
+        this.saveLocalSnapshot();
         this.teardownPhysicsBodies();
         this.node.destroy();
         done?.();
@@ -534,16 +542,18 @@ export class MergeGameController extends Component {
         this.score = 0;
         this.spawnCount = 0;
         this.serial = 0;
+        this.rngState = this.randomSeed();
         this.gameOver = false;
         this.overflowSince = 0;
         this.inputLocked = false;
+        clearMergeSnapshot(sys.localStorage);
         this.updateScore();
         this.chooseNext();
         this.spawnBall();
     }
 
     private chooseNext(): void {
-        this.nextLevel = this.spawnCount < 2 ? 0 : Math.floor(Math.random() * 4);
+        this.nextLevel = this.spawnCount < 2 ? 0 : this.nextRandomInt(4);
         this.refreshNextPreview();
     }
 
@@ -576,30 +586,14 @@ export class MergeGameController extends Component {
     }
 
     private spawnBall(): void {
-        if (!this.board || !this.fruitLayer || this.gameOver) return;
-        const level = this.nextLevel;
-        const spec = MERGE_FRUITS[level];
-        const node = new Node('MergeFruit');
-        node.layer = UI_2D;
-        node.addComponent(UITransform).setContentSize(spec.radius * 2, spec.radius * 2);
-        // 手里的水果先不要刚体。刚体默认是 Dynamic，一创建就会被物理写走，图跟着消失。
-        this.board.addChild(node);
-        node.setPosition(0, DROP_Y - (BOARD_BOTTOM + BOARD_H / 2));
-        const ball = node.addComponent(MergeBall);
-        ball.level = level;
-        ball.serial = ++this.serial;
-        ball.owner = this;
-        const view = new Node('FruitView');
-        view.layer = UI_2D;
-        view.addComponent(UITransform);
-        this.fruitLayer.addChild(view);
-        ball.view = view;
+        if (this.gameOver) return;
+        const ball = this.createBall(this.nextLevel, ++this.serial, 0, this.handLocalY());
+        if (!ball) return;
         this.current = ball;
-        this.paintBall(ball);
-        this.placeFruitView(ball);
         this.spawnCount++;
         this.chooseNext();
         this.inputLocked = false;
+        this.saveLocalSnapshot();
     }
 
     /** 物理步进之后把图片挪到刚体位置。图片不挂在刚体节点上。 */
@@ -1022,6 +1016,7 @@ export class MergeGameController extends Component {
         this.gameOver = true;
         this.inputLocked = true;
         this.current = null;
+        clearMergeSnapshot(sys.localStorage);
         this.updateScore();
         playMergeSfx('gameOver');
 
@@ -1132,10 +1127,140 @@ export class MergeGameController extends Component {
     private updateScore(): void {
         if (this.score > this.best) {
             this.best = this.score;
-            sys.localStorage.setItem(BEST_KEY, String(this.best));
+            writeMergeBest(sys.localStorage, this.best);
+            void pushCloudProgress(sys.localStorage);
         }
         if (this.scoreLabel) this.scoreLabel.string = String(this.score);
         if (this.bestLabel) this.bestLabel.string = String(this.best);
+    }
+
+    private restoreSavedRound(): boolean {
+        const snapshot = readMergeSnapshot(sys.localStorage);
+        if (!snapshot || !this.board) return false;
+        this.unscheduleAllCallbacks();
+        for (const child of [...this.board.children]) {
+            if (child.getComponent(MergeBall)) this.destroyPhysicsNode(child);
+        }
+        this.gameOverLayer?.destroy();
+        this.gameOverLayer = null;
+        this.current = null;
+        this.score = snapshot.score;
+        this.spawnCount = snapshot.spawnCount;
+        this.serial = snapshot.serial;
+        this.nextLevel = snapshot.nextLevel;
+        this.rngState = snapshot.rngState >>> 0;
+        this.gameOver = false;
+        this.overflowSince = 0;
+        this.inputLocked = false;
+        for (let i = 0; i < snapshot.balls.length; i++) {
+            if (!this.restoreBoardBall(snapshot.balls[i])) {
+                clearMergeSnapshot(sys.localStorage);
+                this.teardownPhysicsBodies();
+                return false;
+            }
+        }
+        const current = this.createBall(snapshot.currentLevel, snapshot.serial, snapshot.currentX, this.handLocalY());
+        if (!current) {
+            clearMergeSnapshot(sys.localStorage);
+            this.teardownPhysicsBodies();
+            return false;
+        }
+        this.current = current;
+        this.refreshNextPreview();
+        this.updateScore();
+        this.saveLocalSnapshot();
+        return true;
+    }
+
+    private restoreBoardBall(item: MergeSnapshot['balls'][number]): boolean {
+        const ball = this.createBall(item.level, item.serial, item.x, item.y);
+        if (!ball) return false;
+        ball.node.setRotationFromEuler(0, 0, item.rotation);
+        this.armPhysics(ball);
+        ball.released = true;
+        ball.node.setPosition(item.x, item.y);
+        ball.node.setRotationFromEuler(0, 0, item.rotation);
+        const body = ball.getComponent(RigidBody2D);
+        if (body) {
+            body.linearVelocity = new Vec2(0, 0);
+            body.angularVelocity = 0;
+            body.gravityScale = 2;
+            const sleeper = body as RigidBody2D & { sleep?: () => void };
+            sleeper.sleep?.();
+        }
+        this.placeFruitView(ball);
+        return true;
+    }
+
+    private createBall(level: number, serial: number, x: number, y: number): MergeBall | null {
+        if (!this.board || !this.fruitLayer) return null;
+        const spec = MERGE_FRUITS[level];
+        if (!spec) return null;
+        const node = new Node('MergeFruit');
+        node.layer = UI_2D;
+        node.addComponent(UITransform).setContentSize(spec.radius * 2, spec.radius * 2);
+        this.board.addChild(node);
+        node.setPosition(x, y);
+        const ball = node.addComponent(MergeBall);
+        ball.level = level;
+        ball.serial = serial;
+        ball.owner = this;
+        const view = new Node('FruitView');
+        view.layer = UI_2D;
+        view.addComponent(UITransform);
+        this.fruitLayer.addChild(view);
+        ball.view = view;
+        this.paintBall(ball);
+        this.placeFruitView(ball);
+        return ball;
+    }
+
+    private saveLocalSnapshot(): void {
+        if (!this.current || !this.board || this.inputLocked || this.gameOver) return;
+        const balls: MergeSnapshot['balls'] = [];
+        for (const child of this.board.children) {
+            const ball = child.getComponent(MergeBall);
+            if (!ball || !ball.released || ball.merging || ball === this.current || !child.isValid) continue;
+            balls.push({
+                level: ball.level,
+                x: child.position.x,
+                y: child.position.y,
+                rotation: child.eulerAngles.z,
+                serial: ball.serial,
+            });
+        }
+        balls.sort((a, b) => a.serial - b.serial);
+        writeMergeSnapshot(sys.localStorage, {
+            version: 1,
+            score: this.score,
+            spawnCount: this.spawnCount,
+            serial: this.current.serial,
+            nextLevel: this.nextLevel,
+            currentLevel: this.current.level,
+            currentX: this.current.node.position.x,
+            balls,
+            rngState: this.rngState >>> 0,
+        });
+    }
+
+    private onAppHide(): void {
+        this.saveLocalSnapshot();
+    }
+
+    private handLocalY(): number {
+        return DROP_Y - (BOARD_BOTTOM + BOARD_H / 2);
+    }
+
+    private randomSeed(): number {
+        const stamp = Date.now() >>> 0;
+        const jitter = Math.floor(Math.random() * 0xffffffff) >>> 0;
+        const seed = (stamp ^ jitter ^ 0xa511e9b3) >>> 0;
+        return seed || 1;
+    }
+
+    private nextRandomInt(maxExclusive: number): number {
+        this.rngState = (Math.imul(this.rngState || 1, 1664525) + 1013904223) >>> 0;
+        return maxExclusive > 0 ? this.rngState % maxExclusive : 0;
     }
 
     private rectNode(name: string, w: number, h: number, color: Color, radius: number): Node {

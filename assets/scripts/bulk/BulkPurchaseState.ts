@@ -325,6 +325,31 @@ export class BulkPurchaseState {
         return true;
     }
 
+    /** 半自动续放：当前目标不合法时，只补到已开且未满的同种格。 */
+    debugFindContinueTrayIndex(item: FoodId): number {
+        for (let i = 0; i < this.activeTrays.length; i++) {
+            const tray = this.activeTrays[i];
+            if (tray.sealed || tray.kind !== item || tray.filled >= tray.cap) continue;
+            return i;
+        }
+        return -1;
+    }
+
+    debugResolveBagTopTrayIndex(col: number, preferredIndex: number | null): number {
+        if (preferredIndex != null && this.debugCanPlaceBagTopToTray(col, preferredIndex)) return preferredIndex;
+        const item = this.peekBag(col);
+        if (!item) return -1;
+        return this.debugFindContinueTrayIndex(item);
+    }
+
+    debugResolveCounterTrayIndex(counterIndex: number, preferredIndex: number | null): number {
+        if (preferredIndex != null && this.debugCounterCanPour(counterIndex, preferredIndex)) return preferredIndex;
+        const stack = this.counterStacks[counterIndex];
+        const item = stack?.kind;
+        if (!item || stack.count <= 0) return -1;
+        return this.debugFindContinueTrayIndex(item);
+    }
+
     /** 空格上同种已有未满格。继续收那一格不受这条款限制。 */
     debugRejectsNewTray(item: FoodId, trayIndex: number): boolean {
         const tray = this.activeTrays[trayIndex];

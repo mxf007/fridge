@@ -301,12 +301,22 @@ export class BoardState {
     }
 
     /**
+     * 半自动点击：当前目标能收就沿用；当前目标不行时，只允许续放到已开且未满的同种格。
+     * 不自动开新格，也不自动改去柜台。
+     */
+    resolveTapDest(item: FoodId, source: 'bag' | 'buffer', bagDepth = 1): Dest | null {
+        if (this.dest && this.canAccept(this.dest, item, source, bagDepth).ok) return this.dest;
+        return this.findContinueTrayDest(item, source, bagDepth);
+    }
+
+    /**
      * 拖到某一格但放不进去时的说明。不改目标、不计步、不收走食材。
      * 原因和提示格与一次失败的落子相同；已满时不会顺手改选。
      */
     explainReject(dest: Dest, item: FoodId, source: 'bag' | 'buffer', bagDepth = 1): PlaceFail {
         const check = this.canAccept(dest, item, source, bagDepth);
-        let reason: PlaceReason = check.ok ? 'dest_full' : check.reason;
+        let reason: PlaceReason = 'dest_full';
+        if (!check.ok) reason = (check as { ok: false; reason: PlaceReason }).reason;
         if (!check.ok && source === 'bag' && this.bufferEnabled && this.noFridgeAccepts(item, source, bagDepth)) {
             for (let i = 0; i < this.buffer.length; i++) {
                 if (this.buffer[i] == null) {
@@ -315,9 +325,7 @@ export class BoardState {
                 }
             }
         }
-        const result = this.fail(reason, item, bagDepth);
-        if (!result.ok) return result;
-        return { ok: false, reason, item, hintTrays: [], hintBuffers: [] };
+        return this.fail(reason, item, bagDepth);
     }
 
     /** 冰箱里没有任何一格能收这件。有空格或同种未满格时不算。 */
@@ -328,16 +336,27 @@ export class BoardState {
         return true;
     }
 
+    private findContinueTrayDest(item: FoodId, source: 'bag' | 'buffer', bagDepth: number): Dest | null {
+        for (let i = 0; i < this.trays.length; i++) {
+            const tray = this.trays[i];
+            if (tray.sealed || tray.kind !== item || tray.items.length >= tray.cap) continue;
+            const dest: Dest = { kind: 'tray', index: i };
+            if (this.canAccept(dest, item, source, bagDepth).ok) return dest;
+        }
+        return null;
+    }
+
     private tryPlace(item: FoodId, source: 'bag' | 'buffer', bagDepth = 1): PlaceResult {
         const check = this.canAccept(this.dest, item, source, bagDepth);
         if (!check.ok) {
-            if (check.reason === 'dest_full') this.retargetIfNeeded();
+            const reason = (check as { ok: false; reason: PlaceReason }).reason;
+            if (reason === 'dest_full') this.retargetIfNeeded();
             if (source === 'bag' && this.bufferEnabled && this.noFridgeAccepts(item, source, bagDepth)) {
                 for (let i = 0; i < this.buffer.length; i++) {
                     if (this.buffer[i] == null) return this.fail('need_buffer', item, bagDepth);
                 }
             }
-            return this.fail(check.reason, item, bagDepth);
+            return this.fail(reason, item, bagDepth);
         }
         const dest = this.dest;
         if (!dest) return this.fail('no_target', item);
@@ -357,7 +376,7 @@ export class BoardState {
         return { ok: true, item, dest, sealed, steps: this.steps };
     }
 
-    private fail(reason: PlaceReason, item: FoodId, bagDepth = 1): PlaceResult {
+    private fail(reason: PlaceReason, item: FoodId, bagDepth = 1): PlaceFail {
         return {
             ok: false,
             reason,

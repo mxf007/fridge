@@ -948,7 +948,9 @@ export class GameController extends Component {
         counterPanel.setPosition(0, 0, 0);
         counterPanel.addComponent(UITransform).setContentSize(BUF_BOARD_W, BUF_BOARD_H);
         counterZone.addChild(counterPanel);
-        this.buildBulkP4CounterDemo(counterPanel, board, receipt, demo, () => trayTargetIndex, () => bagTarget, () => {
+        this.buildBulkP4CounterDemo(counterPanel, board, receipt, demo, () => trayTargetIndex, (index) => {
+            trayTargetIndex = index;
+        }, () => bagTarget, () => {
             bagTarget = 'counter';
             syncTrayDemo();
             this.syncBulkP4CounterDemo(counterPanel, demo, trayTargetIndex, bagTarget);
@@ -977,13 +979,17 @@ export class GameController extends Component {
             const item = demo.peekBag(col);
             if (!item) return;
             const from = this.findBulkBagTop(bagHost, col);
+            const selectedTrayIndex = trayTargetIndex;
+            const resolvedTrayIndex = bagTarget === 'tray'
+                ? demo.debugResolveBagTopTrayIndex(col, selectedTrayIndex)
+                : -1;
             const commitBagPlace = () => {
-                const placedTray = bagTarget === 'tray' ? trayTargetIndex : null;
+                const placedTray = bagTarget === 'tray' && resolvedTrayIndex >= 0 ? resolvedTrayIndex : null;
                 const slot = placedTray != null ? demo.activeTrays[placedTray] : null;
                 let ok = false;
                 if (bagTarget === 'tray') {
-                    if (trayTargetIndex == null) return;
-                    ok = demo.debugPlaceBagTopToTray(col, trayTargetIndex);
+                    if (placedTray == null) return;
+                    ok = demo.debugPlaceBagTopToTray(col, placedTray);
                 } else {
                     ok = demo.debugPlaceBagTopToAnyCounter(col);
                 }
@@ -1002,17 +1008,18 @@ export class GameController extends Component {
                 settleAfterMove();
             };
             if (bagTarget === 'tray') {
-                if (trayTargetIndex == null) {
-                    this.showHomeToast('请先点一个可收的冰箱格');
-                    return;
-                }
-                if (!demo.debugCanPlaceBagTopToTray(col, trayTargetIndex)) {
-                    this.showHomeToast(demo.debugRejectsNewTray(item, trayTargetIndex)
+                if (resolvedTrayIndex < 0) {
+                    if (selectedTrayIndex == null) {
+                        this.showHomeToast('请先点一个可收的冰箱格');
+                        return;
+                    }
+                    this.showHomeToast(demo.debugRejectsNewTray(item, selectedTrayIndex)
                         ? this.bulkAntiSplitToast(item)
                         : '这件现在进不了当前目标格');
                     return;
                 }
-                const to = this.bulkFridgeLandNode(board, trayTargetIndex);
+                trayTargetIndex = resolvedTrayIndex;
+                const to = this.bulkFridgeLandNode(board, resolvedTrayIndex);
                 if (from && to) this.flyBulkItem(card, from, to, item, { w: 48, h: 48 }, commitBagPlace, false);
                 else commitBagPlace();
                 return;
@@ -1046,6 +1053,9 @@ export class GameController extends Component {
                     this.syncBulkP4CounterDemo(counterPanel as Node, demo, trayTargetIndex, bagTarget);
                     syncBagDemo();
                     settleAfterMove();
+                },
+                (index) => {
+                    trayTargetIndex = index;
                 },
                 () => {
                     trayTargetIndex = null;
@@ -1775,6 +1785,7 @@ export class GameController extends Component {
         receipt: Node,
         demo: BulkPurchaseState,
         getTrayTargetIndex: () => number | null,
+        setTrayTargetIndex: (index: number | null) => void,
         getBagTarget: () => 'tray' | 'counter',
         onSelectCounter: () => void,
         extraSync: () => void,
@@ -1842,7 +1853,20 @@ export class GameController extends Component {
                 new Color(176, 130, 96, 72),
             );
             panel.addChild(slot);
-            this.bindBulkP4CounterPress(slot, i, board, panel, receipt, demo, getTrayTargetIndex, getBagTarget, onSelectCounter, extraSync, clearTrayTarget);
+            this.bindBulkP4CounterPress(
+                slot,
+                i,
+                board,
+                panel,
+                receipt,
+                demo,
+                getTrayTargetIndex,
+                setTrayTargetIndex,
+                getBagTarget,
+                onSelectCounter,
+                extraSync,
+                clearTrayTarget,
+            );
         }
         this.syncBulkP4CounterDemo(panel, demo, getTrayTargetIndex(), getBagTarget());
     }
@@ -1873,6 +1897,7 @@ export class GameController extends Component {
         receipt: Node,
         demo: BulkPurchaseState,
         getTrayTargetIndex: () => number | null,
+        setTrayTargetIndex: (index: number | null) => void,
         getBagTarget: () => 'tray' | 'counter',
         onSelectCounter: () => void,
         extraSync: () => void,
@@ -1883,7 +1908,18 @@ export class GameController extends Component {
         const canPourNow = () => getBagTarget() === 'tray' && (demo.counterStacks[counterIndex]?.count || 0) > 0;
         const repeatPour = () => {
             if (!pressing) return;
-            if (!this.pourBulkP4Counter(board, panel, receipt, demo, counterIndex, getTrayTargetIndex(), true, extraSync, clearTrayTarget)) {
+            if (!this.pourBulkP4Counter(
+                board,
+                panel,
+                receipt,
+                demo,
+                counterIndex,
+                getTrayTargetIndex(),
+                true,
+                extraSync,
+                setTrayTargetIndex,
+                clearTrayTarget,
+            )) {
                 pressing = false;
                 longActive = false;
                 this.unschedule(repeatPour);
@@ -1923,7 +1959,20 @@ export class GameController extends Component {
             this.unschedule(repeatPour);
             tween(slot).to(0.08, { scale: new Vec3(1, 1, 1) }).start();
             if (!shouldTap) return;
-            if (pour) this.pourBulkP4Counter(board, panel, receipt, demo, counterIndex, getTrayTargetIndex(), false, extraSync, clearTrayTarget);
+            if (pour) {
+                this.pourBulkP4Counter(
+                    board,
+                    panel,
+                    receipt,
+                    demo,
+                    counterIndex,
+                    getTrayTargetIndex(),
+                    false,
+                    extraSync,
+                    setTrayTargetIndex,
+                    clearTrayTarget,
+                );
+            }
             else onSelectCounter();
         };
         slot.on(Node.EventType.TOUCH_END, (e: EventTouch) => {
@@ -1961,29 +2010,34 @@ export class GameController extends Component {
         trayIndex: number | null,
         quiet: boolean,
         extraSync: () => void,
+        setTrayTargetIndex: (index: number | null) => void,
         clearTrayTarget: () => void,
     ): boolean {
         if (!quiet && this.busy) return false;
-        if (trayIndex == null) {
-            if (!quiet) this.showHomeToast('请先点一个可收的冰箱格');
-            return false;
-        }
-        if (!demo.debugCounterCanPour(counterIndex, trayIndex)) {
+        const selectedTrayIndex = trayIndex;
+        const resolvedTrayIndex = demo.debugResolveCounterTrayIndex(counterIndex, selectedTrayIndex);
+        if (resolvedTrayIndex < 0) {
             if (!quiet) {
+                if (selectedTrayIndex == null) {
+                    this.showHomeToast('请先点一个可收的冰箱格');
+                    return false;
+                }
                 const kind = demo.counterStacks[counterIndex]?.kind;
-                this.showHomeToast(kind && demo.debugRejectsNewTray(kind, trayIndex)
+                this.showHomeToast(kind && demo.debugRejectsNewTray(kind, selectedTrayIndex)
                     ? this.bulkAntiSplitToast(kind)
                     : '这叠现在倒不进当前目标格');
             }
             return false;
         }
+        const activeTrayIndex = resolvedTrayIndex;
+        setTrayTargetIndex(activeTrayIndex);
         const commit = (): boolean => {
-            const slot = demo.activeTrays[trayIndex];
-            const ok = demo.debugPourOneFromCounter(counterIndex, trayIndex);
+            const slot = demo.activeTrays[activeTrayIndex];
+            const ok = demo.debugPourOneFromCounter(counterIndex, activeTrayIndex);
             if (!ok) return false;
-            const activeNow = demo.activeTrays[trayIndex];
+            const activeNow = demo.activeTrays[activeTrayIndex];
             if (!activeNow || activeNow.sealed || activeNow.filled >= activeNow.cap) clearTrayTarget();
-            if (activeNow && activeNow.kind) this.bulkPulseTrayIndex = trayIndex;
+            if (activeNow && activeNow.kind) this.bulkPulseTrayIndex = activeTrayIndex;
             if (slot) this.playBulkFridgeArrive(slot.sealed);
             extraSync();
             this.syncBulkP5ReceiptDemo(receipt, demo);
@@ -1993,7 +2047,7 @@ export class GameController extends Component {
         if (quiet) return commit();
         const item = demo.counterStacks[counterIndex]?.kind;
         const icon = panel.getChildByName(`Counter${counterIndex}`)?.getChildByName('Icon');
-        const tray = this.bulkFridgeLandNode(board, trayIndex);
+        const tray = this.bulkFridgeLandNode(board, activeTrayIndex);
         const host = board.parent;
         if (!item || !icon || !tray || !host) return commit();
         this.flyBulkItem(host, icon, tray, item, { w: 48, h: 48 }, () => { commit(); }, false);
@@ -6087,10 +6141,13 @@ export class GameController extends Component {
         const item = board.peekBag(col);
         if (!item) return;
         this.dismissSizeIntro();
-        const check = board.canAccept(board.dest, item, 'bag', board.bags[col].length);
+        const tapDest = board.resolveTapDest(item, 'bag', board.bags[col].length);
+        if (tapDest) board.dest = tapDest;
+        const activeDest = tapDest || board.dest;
+        const check = board.canAccept(activeDest, item, 'bag', board.bags[col].length);
         if (!check.ok) {
             const result = board.placeFromBag(col);
-            if (!result.ok) this.showPlaceFail(result);
+            if (!result.ok) this.showPlaceFail(result as PlaceFail);
             this.shakeBagTop(col);
             return;
         }
@@ -6103,7 +6160,7 @@ export class GameController extends Component {
         }
 
         this.busy = true;
-        const toBuffer = board.dest != null && board.dest.kind === 'buffer';
+        const toBuffer = activeDest != null && activeDest.kind === 'buffer';
         const foodNode = top.getChildByName('Food');
         const fromNode = foodNode || top;
         const fromWorld = fromNode.worldPosition.clone();
@@ -6119,10 +6176,10 @@ export class GameController extends Component {
             flyW = 96;
             flyH = 96;
         }
-        const flyVisual = this.prepFridgeFlyVisual(item, board.dest, flyW, flyH);
+        const flyVisual = this.prepFridgeFlyVisual(item, activeDest, flyW, flyH);
         flyW = flyVisual.flyW;
         flyH = flyVisual.flyH;
-        const landing = board.dest ? this.placeLanding(item, board.dest, flyW, flyH) : null;
+        const landing = activeDest ? this.placeLanding(item, activeDest, flyW, flyH) : null;
         if (!landing) {
             this.commitPlace(col);
             return;
@@ -6150,17 +6207,20 @@ export class GameController extends Component {
         if (!board || !root) return;
         const item = board.buffer[index];
         if (item == null) return;
-        const check = board.canAccept(board.dest, item, 'buffer');
+        const tapDest = board.resolveTapDest(item, 'buffer');
+        if (tapDest) board.dest = tapDest;
+        const activeDest = tapDest || board.dest;
+        const check = board.canAccept(activeDest, item, 'buffer');
         if (!check.ok) {
             const result = board.placeFromBuffer(index);
-            if (!result.ok) this.showPlaceFail(result);
+            if (!result.ok) this.showPlaceFail(result as PlaceFail);
             return;
         }
 
         const wrap = root.getChildByName('BufferBoard');
         const slot = wrap ? wrap.getChildByName(`Buffer${index}`) : null;
         const food = slot ? slot.getChildByName('Food') : null;
-        const destIndex = board.dest && board.dest.kind === 'tray' ? board.dest.index : 0;
+        const destIndex = activeDest && activeDest.kind === 'tray' ? activeDest.index : 0;
         const trayNode = root.getChildByName(`Tray${destIndex}`);
         if (!food || !trayNode) {
             this.commitPlaceFromBuffer(index);
@@ -6203,9 +6263,10 @@ export class GameController extends Component {
         const result = board.placeFromBuffer(index);
         if (!result.ok) {
             this.busy = false;
-            this.prepareSizeFail(result);
+            const fail = result as PlaceFail;
+            this.prepareSizeFail(fail);
             this.render();
-            this.showPlaceFail(result);
+            this.showPlaceFail(fail);
             this.playSizeFeedback();
             return;
         }
@@ -6234,9 +6295,10 @@ export class GameController extends Component {
         const result = board.placeFromBag(col);
         if (!result.ok) {
             this.busy = false;
-            this.prepareSizeFail(result);
+            const fail = result as PlaceFail;
+            this.prepareSizeFail(fail);
             this.render();
-            this.showPlaceFail(result);
+            this.showPlaceFail(fail);
             this.playSizeFeedback();
             return;
         }

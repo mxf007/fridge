@@ -462,6 +462,10 @@ export class MergeGameController extends Component {
         g.lineWidth = 8;
         g.roundRect(-BOARD_W / 2, -BOARD_H / 2, BOARD_W, BOARD_H, 22);
         g.stroke();
+        g.strokeColor = new Color(255, 248, 239, 170);
+        g.lineWidth = 2;
+        g.roundRect(-BOARD_W / 2 + 9, -BOARD_H / 2 + 9, BOARD_W - 18, BOARD_H - 18, 16);
+        g.stroke();
 
         const line = new Node('FailLine');
         line.layer = UI_2D;

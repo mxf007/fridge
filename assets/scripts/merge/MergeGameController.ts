@@ -33,6 +33,7 @@ import {
     instantiate,
 } from 'cc';
 import { MergeBall } from './MergeBall';
+import { mergeOnIos } from './mergeRuntime';
 import { clearMergeSnapshot, readMergeBest, readMergeSnapshot, type MergeSnapshot, writeMergeBest, writeMergeSnapshot } from './MergeSave';
 import { playMergeSfx } from './MergeSfx';
 import { pushCloudProgress } from '../game/CloudSave';
@@ -52,6 +53,10 @@ const BOARD_TOP = BOARD_BOTTOM + BOARD_H;
 const FAIL_Y = BOARD_TOP - 75;
 const DROP_Y = BOARD_TOP + 40;
 const WALL = 24;
+/** 待投放水果下方的落点虚线：圆点半径、圆心间距、离果底的空隙。 */
+const DROP_GUIDE_DOT = 3.5;
+const DROP_GUIDE_STEP = 28;
+const DROP_GUIDE_GAP = 20;
 /** HUD 行中心到各控件下缘（设计像素），用于和框顶 clamp。 */
 const HOME_BTN_EXTENT_BELOW = 44;
 const SCORE_SHELF_EXTENT_BELOW = 42;
@@ -72,6 +77,10 @@ const HUD_CLEAR_ABOVE_DROP = 48;
 const SCORE_SHELF_ABOVE = 40;
 const SCORE_TAG_GAP = 20;
 const TITLE_TAG_GAP = 12;
+/** iOS 掉帧时多补几步物理，减轻「慢动作」感；上限不宜过大以免更卡。 */
+const IOS_PHYSICS_MAX_SUB_STEPS = 4;
+/** 像素/秒，低于此视为已落地，关闭 bullet 以省连续碰撞检测。 */
+const IOS_BULLET_OFF_SPEED_PX = 48;
 
 const CREAM = new Color(246, 239, 230, 255);
 const WALNUT = new Color(107, 74, 58, 255);
@@ -131,6 +140,8 @@ export class MergeGameController extends Component {
     private screenH = DESIGN_H;
     /** 水果图片层。和刚体分开，避免物理节点上的 Sprite 不绘制。 */
     private fruitLayer: Node | null = null;
+    /** 待投放水果正下方的同色虚线，松手后清掉。 */
+    private dropGuide: Graphics | null = null;
     private homeBtnSprite: Sprite | null = null;
     private replayBtnSprite: Sprite | null = null;
 
@@ -156,6 +167,7 @@ export class MergeGameController extends Component {
         director.off(Director.EVENT_AFTER_PHYSICS, this.syncFruitViews, this);
         game.off(Game.EVENT_HIDE, this.onAppHide, this);
         this.unscheduleAllCallbacks();
+        if (mergeOnIos()) PhysicsSystem2D.instance.enable = false;
     }
 
     requestMerge(a: MergeBall, b: MergeBall): void {
@@ -203,6 +215,7 @@ export class MergeGameController extends Component {
         if (body && body.type === ERigidBody2DType.Dynamic) {
             body.linearVelocity = new Vec2(0, 0);
             body.angularVelocity = 0;
+            if (mergeOnIos()) body.bullet = false;
         }
     }
 
@@ -425,6 +438,11 @@ export class MergeGameController extends Component {
         PhysicsSystem2D.instance.enable = true;
         // 与原项目一致：世界重力用引擎默认的 -320，松手时再把倍率提到 20。
         PhysicsSystem2D.instance.gravity = new Vec2(0, -320);
+        if (mergeOnIos()) {
+            const physics = PhysicsSystem2D.instance;
+            physics.maxSubSteps = IOS_PHYSICS_MAX_SUB_STEPS;
+            physics.allowSleep = true;
+        }
         director.on(Director.EVENT_AFTER_PHYSICS, this.syncFruitViews, this);
     }
 
@@ -488,6 +506,12 @@ export class MergeGameController extends Component {
         lg.stroke();
         line.setPosition(0, FAIL_Y - (BOARD_BOTTOM + BOARD_H / 2));
         this.board.addChild(line);
+
+        const guide = new Node('DropGuide');
+        guide.layer = UI_2D;
+        guide.addComponent(UITransform).setContentSize(BOARD_W, BOARD_H);
+        this.dropGuide = guide.addComponent(Graphics);
+        this.board.addChild(guide);
 
         const floorTop = -BOARD_H / 2 + 4;
         const floorH = 520;
@@ -597,6 +621,7 @@ export class MergeGameController extends Component {
         this.spawnCount++;
         this.chooseNext();
         this.inputLocked = false;
+        this.syncDropGuide();
         this.saveLocalSnapshot();
     }
 
@@ -618,6 +643,26 @@ export class MergeGameController extends Component {
         view.setRotation(ball.node.rotation);
     }
 
+    /** 按当前水果的颜色，在它正下方画一列圆点。没有待投放水果时清空。 */
+    private syncDropGuide(): void {
+        const g = this.dropGuide;
+        if (!g?.isValid) return;
+        g.clear();
+        const ball = this.current;
+        if (!ball?.node?.isValid || ball.released || this.gameOver) return;
+        const spec = MERGE_FRUITS[ball.level];
+        if (!spec) return;
+        const x = ball.node.position.x;
+        const top = ball.node.position.y - spec.radius - DROP_GUIDE_GAP;
+        const bottom = -BOARD_H / 2 + 28;
+        if (top < bottom) return;
+        g.fillColor = new Color(spec.color.r, spec.color.g, spec.color.b, 255);
+        for (let y = top; y >= bottom; y -= DROP_GUIDE_STEP) {
+            g.circle(x, y, DROP_GUIDE_DOT);
+            g.fill();
+        }
+    }
+
     /** 松手后才挂刚体。节点先关掉，避免刚体按默认 Dynamic 在 onLoad 里生成。 */
     private armPhysics(ball: MergeBall): void {
         const node = ball.node;
@@ -629,7 +674,8 @@ export class MergeGameController extends Component {
         body.gravityScale = 20;
         body.enabledContactListener = true;
         body.fixedRotation = false;
-        body.bullet = true;
+        // iOS：仅下落段开 bullet；碰堆后关，避免全场 CCD 拖帧。
+        body.bullet = mergeOnIos();
         body.linearDamping = 0.99;
         body.angularDamping = 0;
         const collider = node.addComponent(CircleCollider2D);
@@ -682,19 +728,23 @@ export class MergeGameController extends Component {
             sprite.enabled = false;
         }
         let g = view.getComponent(Graphics);
-        if (!g) g = view.addComponent(Graphics);
-        g.enabled = true;
-        g.clear();
-        g.fillColor = new Color(61, 50, 41, 34);
-        g.circle(0, -4, Math.max(8, spec.radius - 4));
-        g.fill();
-        g.fillColor = new Color(255, 253, 248, textureReady ? 160 : 110);
-        g.circle(0, 0, Math.max(10, spec.radius - 1));
-        g.fill();
-        if (!textureReady) {
-            g.fillColor = spec.color;
-            g.circle(0, 0, Math.max(8, spec.radius - 5));
+        if (mergeOnIos() && textureReady) {
+            if (g) g.enabled = false;
+        } else {
+            if (!g) g = view.addComponent(Graphics);
+            g.enabled = true;
+            g.clear();
+            g.fillColor = new Color(61, 50, 41, 34);
+            g.circle(0, -4, Math.max(8, spec.radius - 4));
             g.fill();
+            g.fillColor = new Color(255, 253, 248, textureReady ? 160 : 110);
+            g.circle(0, 0, Math.max(10, spec.radius - 1));
+            g.fill();
+            if (!textureReady) {
+                g.fillColor = spec.color;
+                g.circle(0, 0, Math.max(8, spec.radius - 5));
+                g.fill();
+            }
         }
 
         let labelNode = view.getChildByName('FruitName');
@@ -940,6 +990,10 @@ export class MergeGameController extends Component {
             if (!body || !body.enabled || body.type !== ERigidBody2DType.Dynamic) continue;
             const velocity = body.linearVelocity;
             if (velocity.y < 0) body.linearVelocity = new Vec2(velocity.x, 0);
+            if (mergeOnIos()) {
+                const speedPx = Math.hypot(velocity.x, velocity.y) * 32;
+                if (speedPx < IOS_BULLET_OFF_SPEED_PX) body.bullet = false;
+            }
         }
     }
 
@@ -960,6 +1014,7 @@ export class MergeGameController extends Component {
         this.current.released = true;
         this.placeFruitView(this.current);
         this.current = null;
+        this.syncDropGuide();
         this.inputLocked = true;
         playMergeSfx('drop');
         this.scheduleOnce(() => this.checkGameOverOrContinue(), 0.45);
@@ -979,6 +1034,7 @@ export class MergeGameController extends Component {
         const max = BOARD_W / 2 - WALL - radius;
         this.current.node.setPosition(Math.max(min, Math.min(max, local.x)), DROP_Y - (BOARD_BOTTOM + BOARD_H / 2));
         this.placeFruitView(this.current);
+        this.syncDropGuide();
     }
 
     private checkGameOverOrContinue(): void {
@@ -1020,6 +1076,7 @@ export class MergeGameController extends Component {
         this.gameOver = true;
         this.inputLocked = true;
         this.current = null;
+        this.syncDropGuide();
         clearMergeSnapshot(sys.localStorage);
         this.updateScore();
         playMergeSfx('gameOver');
@@ -1171,6 +1228,7 @@ export class MergeGameController extends Component {
         }
         this.current = current;
         this.refreshNextPreview();
+        this.syncDropGuide();
         this.updateScore();
         this.saveLocalSnapshot();
         return true;
@@ -1189,6 +1247,7 @@ export class MergeGameController extends Component {
             body.linearVelocity = new Vec2(0, 0);
             body.angularVelocity = 0;
             body.gravityScale = 2;
+            if (mergeOnIos()) body.bullet = false;
             const sleeper = body as RigidBody2D & { sleep?: () => void };
             sleeper.sleep?.();
         }

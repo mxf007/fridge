@@ -7,6 +7,7 @@ import {
     Node,
     RigidBody2D,
 } from 'cc';
+import { mergeOnIos } from './mergeRuntime';
 
 const { ccclass } = _decorator;
 
@@ -52,6 +53,11 @@ export class MergeBall extends Component {
         // 原项目：两颗水果一碰上，重力倍率从 20 降到 2，堆叠不再猛砸。
         const body = this.getComponent(RigidBody2D);
         if (body && body.gravityScale !== 2) body.gravityScale = 2;
+        if (mergeOnIos()) {
+            body.bullet = false;
+            const peerBody = peer.getComponent(RigidBody2D);
+            if (peerBody) peerBody.bullet = false;
+        }
         this.owner.requestMerge(this, peer);
     }
 }

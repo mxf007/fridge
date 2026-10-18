@@ -1,5 +1,26 @@
+import { FOOD_IDS, type FoodId } from '../game/types';
+import { isMatchFood, isMatchIce, MATCH_ICE } from './MatchCells';
+import type { MatchCell, MatchGrid, MatchLevelDef } from './MatchTypes';
+
 export const MATCH_PROGRESS_KEY = 'fridge_match_progress_v1';
+/** 单关进行中的盘面。只写本机，不进云存档。 */
+export const MATCH_LEVEL_CACHE_KEY = 'fridge_match_level_cache_v1';
 const MATCH_PROGRESS_VERSION = 2;
+const MATCH_LEVEL_CACHE_VERSION = 1;
+
+export type MatchLevelSnapshot = {
+    version: number;
+    levelId: number;
+    grid: MatchGrid;
+    matches: number;
+    shuffles: number;
+    hintsRemaining: number;
+    hintsUsed: number;
+    reshufflesRemaining: number | null;
+    reshufflesUsed: number;
+    /** 离开时若正卡在死局或步数用尽，回来继续弹出对应结果。 */
+    outcome: 'play' | 'deadlock' | 'step_limit';
+};
 
 export type MatchKv = {
     getItem(key: string): string | null;
@@ -213,4 +234,142 @@ export function markMatchLevelClearedWithBadge(
     }
     const saved = writeMatchProgress(kv, withBadge, levelIds);
     return { progress: saved, firstClear: true, badgeEarned: badgeId };
+}
+
+const FOOD_ID_SET = new Set<string>(FOOD_IDS);
+
+function readLevelCacheFile(kv: MatchKv): { version: number; levels: Record<string, unknown> } {
+    const raw = kv.getItem(MATCH_LEVEL_CACHE_KEY);
+    if (!raw) return { version: MATCH_LEVEL_CACHE_VERSION, levels: {} };
+    try {
+        const parsed = JSON.parse(raw) as { version?: unknown; levels?: unknown };
+        if (
+            !parsed
+            || parsed.version !== MATCH_LEVEL_CACHE_VERSION
+            || !parsed.levels
+            || typeof parsed.levels !== 'object'
+            || Array.isArray(parsed.levels)
+        ) {
+            return { version: MATCH_LEVEL_CACHE_VERSION, levels: {} };
+        }
+        return { version: MATCH_LEVEL_CACHE_VERSION, levels: parsed.levels as Record<string, unknown> };
+    } catch {
+        return { version: MATCH_LEVEL_CACHE_VERSION, levels: {} };
+    }
+}
+
+function writeLevelCacheFile(kv: MatchKv, levels: Record<string, unknown>): void {
+    kv.setItem(MATCH_LEVEL_CACHE_KEY, JSON.stringify({
+        version: MATCH_LEVEL_CACHE_VERSION,
+        levels,
+    }));
+}
+
+function countFoods(grid: MatchGrid): Map<FoodId, number> {
+    const counts = new Map<FoodId, number>();
+    for (let row = 0; row < grid.length; row++) {
+        for (let column = 0; column < grid[row].length; column++) {
+            const cell = grid[row][column];
+            if (!isMatchFood(cell)) continue;
+            counts.set(cell, (counts.get(cell) ?? 0) + 1);
+        }
+    }
+    return counts;
+}
+
+function nonNegativeInt(value: unknown): number | null {
+    if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) return null;
+    return value;
+}
+
+/** 缓存必须和关卡定义对得上：尺寸、冰块位置不变，消掉的食材成对减少。 */
+function sanitizeLevelSnapshot(raw: unknown, level: MatchLevelDef): MatchLevelSnapshot | null {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+    const source = raw as Record<string, unknown>;
+    if (source.version !== MATCH_LEVEL_CACHE_VERSION) return null;
+    if (source.levelId !== level.id) return null;
+    if (!Array.isArray(source.grid) || source.grid.length !== level.rows) return null;
+    const layout = level.layout;
+    const grid: MatchGrid = [];
+    for (let row = 0; row < level.rows; row++) {
+        const line = source.grid[row];
+        const layoutRow = layout[row];
+        if (!Array.isArray(line) || !layoutRow || line.length !== level.columns || layoutRow.length !== level.columns) {
+            return null;
+        }
+        const next: MatchCell[] = [];
+        for (let column = 0; column < level.columns; column++) {
+            const cell = line[column];
+            const layoutCell = layoutRow[column];
+            if (isMatchIce(layoutCell)) {
+                if (cell !== MATCH_ICE) return null;
+                next.push(MATCH_ICE);
+                continue;
+            }
+            if (cell === MATCH_ICE) return null;
+            if (cell == null) {
+                next.push(null);
+                continue;
+            }
+            if (typeof cell !== 'string' || !FOOD_ID_SET.has(cell)) return null;
+            next.push(cell as FoodId);
+        }
+        grid.push(next);
+    }
+    const matches = nonNegativeInt(source.matches);
+    const shuffles = nonNegativeInt(source.shuffles);
+    const hintsRemaining = nonNegativeInt(source.hintsRemaining);
+    const hintsUsed = nonNegativeInt(source.hintsUsed);
+    const reshufflesUsed = nonNegativeInt(source.reshufflesUsed);
+    if (matches == null || shuffles == null || hintsRemaining == null || hintsUsed == null || reshufflesUsed == null) {
+        return null;
+    }
+    let reshufflesRemaining: number | null = null;
+    if (source.reshufflesRemaining != null) {
+        reshufflesRemaining = nonNegativeInt(source.reshufflesRemaining);
+        if (reshufflesRemaining == null) return null;
+    }
+    if (source.outcome !== 'play' && source.outcome !== 'deadlock' && source.outcome !== 'step_limit') return null;
+    const layoutCounts = countFoods(layout);
+    const savedCounts = countFoods(grid);
+    let removed = 0;
+    for (const [food, layoutCount] of layoutCounts) {
+        const savedCount = savedCounts.get(food) ?? 0;
+        if (savedCount > layoutCount) return null;
+        const delta = layoutCount - savedCount;
+        if (delta % 2 !== 0) return null;
+        removed += delta;
+        savedCounts.delete(food);
+    }
+    if (savedCounts.size > 0) return null;
+    if (removed !== matches * 2) return null;
+    return {
+        version: MATCH_LEVEL_CACHE_VERSION,
+        levelId: level.id,
+        grid,
+        matches,
+        shuffles,
+        hintsRemaining,
+        hintsUsed,
+        reshufflesRemaining,
+        reshufflesUsed,
+        outcome: source.outcome,
+    };
+}
+
+export function readMatchLevelSnapshot(kv: MatchKv, level: MatchLevelDef): MatchLevelSnapshot | null {
+    const file = readLevelCacheFile(kv);
+    return sanitizeLevelSnapshot(file.levels[String(level.id)], level);
+}
+
+export function writeMatchLevelSnapshot(kv: MatchKv, snapshot: MatchLevelSnapshot): void {
+    const file = readLevelCacheFile(kv);
+    file.levels[String(snapshot.levelId)] = snapshot;
+    writeLevelCacheFile(kv, file.levels);
+}
+
+export function clearMatchLevelSnapshot(kv: MatchKv, levelId: number): void {
+    const file = readLevelCacheFile(kv);
+    delete file.levels[String(levelId)];
+    writeLevelCacheFile(kv, file.levels);
 }

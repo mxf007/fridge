@@ -1,13 +1,18 @@
 import {
+    clearMatchLevelSnapshot,
     gmJumpMatchProgress,
     markMatchLevelCleared,
     markMatchLevelClearedWithBadge,
     mergeMatchProgress,
+    MATCH_LEVEL_CACHE_KEY,
     MATCH_PROGRESS_KEY,
+    readMatchLevelSnapshot,
     readMatchProgress,
     setCurrentMatchLevel,
+    writeMatchLevelSnapshot,
     type MatchKv,
 } from './MatchSave';
+import type { MatchLevelDef } from './MatchTypes';
 
 class MemoryKv implements MatchKv {
     private values: Record<string, string> = {};
@@ -142,4 +147,58 @@ export function selfCheckMatchSave(): void {
     assertEqual(jumped.clearedLevelIds.join(','), '1,2,3', 'gm jump cleared prefix');
     const reset = gmJumpMatchProgress(gmKv, [1, 2, 3, 4, 5], 0);
     assertEqual(reset.clearedLevelIds.length, 0, 'gm reset');
+
+    const mini: MatchLevelDef = {
+        id: 4,
+        rows: 2,
+        columns: 2,
+        collapse: 'left',
+        layout: [
+            ['milk', 'veg'],
+            ['veg', 'milk'],
+        ],
+    };
+    const cacheKv = new MemoryKv();
+    assert(readMatchLevelSnapshot(cacheKv, mini) == null, 'no level snapshot yet');
+    writeMatchLevelSnapshot(cacheKv, {
+        version: 1,
+        levelId: 4,
+        grid: [
+            ['milk', null],
+            [null, 'milk'],
+        ],
+        matches: 1,
+        shuffles: 0,
+        hintsRemaining: 1,
+        hintsUsed: 0,
+        reshufflesRemaining: 1,
+        reshufflesUsed: 0,
+        outcome: 'play',
+    });
+    const saved = readMatchLevelSnapshot(cacheKv, mini);
+    assert(saved != null && saved.matches === 1 && saved.grid[0][1] == null, 'level snapshot roundtrip');
+    assert(cacheKv.getItem(MATCH_PROGRESS_KEY) == null, 'level snapshot must not write progress');
+    clearMatchLevelSnapshot(cacheKv, 4);
+    assert(readMatchLevelSnapshot(cacheKv, mini) == null, 'cleared level snapshot');
+    cacheKv.setItem(MATCH_LEVEL_CACHE_KEY, JSON.stringify({
+        version: 1,
+        levels: {
+            4: {
+                version: 1,
+                levelId: 4,
+                grid: [
+                    ['milk', 'veg'],
+                    ['veg', null],
+                ],
+                matches: 1,
+                shuffles: 0,
+                hintsRemaining: 1,
+                hintsUsed: 0,
+                reshufflesRemaining: 1,
+                reshufflesUsed: 0,
+                outcome: 'play',
+            },
+        },
+    }));
+    assert(readMatchLevelSnapshot(cacheKv, mini) == null, 'odd food removal must be dropped');
 }

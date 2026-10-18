@@ -7,7 +7,7 @@ const PATHS: Record<MergeSfxId, string> = {
     click: 'merge/audio/merge_click',
     drop: 'merge/audio/merge_drop',
     merge: 'merge/audio/merge_pop',
-    gameOver: 'merge/audio/merge_game_over',
+    gameOver: 'audio/game_failed',
 };
 
 const clips = new Map<MergeSfxId, AudioClip>();

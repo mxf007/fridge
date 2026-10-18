@@ -313,6 +313,18 @@ export class MatchBoardState {
         return new MatchBoardState(level);
     }
 
+    /** 用本机缓存的盘面接着玩。调用方须先校验格子和关卡定义一致。 */
+    static resume(level: MatchLevelDef, grid: MatchGrid, matches: number, shuffles: number): MatchBoardState {
+        assertMatchLevel(level);
+        const board = new MatchBoardState(level);
+        board.cells = cloneGrid(grid);
+        board.matches = matches;
+        board.shuffles = shuffles;
+        board.selectedPoint = null;
+        board.status = evaluateMatchStatus(board.cells, board.level.maxLinkTurns ?? 2);
+        return board;
+    }
+
     private constructor(level: MatchLevelDef) {
         this.level = {
             ...level,

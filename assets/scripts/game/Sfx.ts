@@ -17,7 +17,7 @@ const PATHS: Record<SfxId, string> = {
     game_failed: 'audio/game_failed',
     game_df: 'audio/game_df',
     bx_open: 'audio/bx_open',
-    match_pair: 'audio/snd_04',
+    match_pair: 'audio/jifen',
     match_hint: 'audio/snd_07',
     match_fail: 'audio/hec_error',
 };

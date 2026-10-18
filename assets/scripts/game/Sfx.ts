@@ -1,7 +1,15 @@
 import { AudioClip, AudioSource, director, Node, resources, sys } from 'cc';
 
 /** 不播 BGM。资源在 assets/resources/audio，跟主包一起构建。 */
-export type SfxId = 'click_btn' | 'win_tg' | 'game_failed' | 'game_df' | 'bx_open';
+export type SfxId =
+    | 'click_btn'
+    | 'win_tg'
+    | 'game_failed'
+    | 'game_df'
+    | 'bx_open'
+    | 'match_pair'
+    | 'match_hint'
+    | 'match_fail';
 
 const PATHS: Record<SfxId, string> = {
     click_btn: 'audio/CLICK_BTN',
@@ -9,7 +17,11 @@ const PATHS: Record<SfxId, string> = {
     game_failed: 'audio/game_failed',
     game_df: 'audio/game_df',
     bx_open: 'audio/bx_open',
+    match_pair: 'audio/snd_04',
+    match_hint: 'audio/snd_07',
+    match_fail: 'audio/hec_error',
 };
+
 
 export const SFX_ENABLED_KEY = 'fridge_sfx';
 export const VIBRATION_ENABLED_KEY = 'fridge_vibration';
@@ -121,6 +133,26 @@ export function playBtnClick(): void {
 /** 食材落进冰箱格（含点击/拖动飞入后落定）。 */
 export function playFridgeDrop(): void {
     playSfx('game_df');
+}
+
+/** 清理冰箱：一对食材消除。 */
+export function playMatchPair(): void {
+    playSfx('match_pair');
+}
+
+/** 清理冰箱：点击提示。 */
+export function playMatchHint(): void {
+    playSfx('match_hint');
+}
+
+/** 今晚冰箱：落子被拒，提示「这格只收…」。 */
+export function playWrongKind(): void {
+    playSfx('match_hint');
+}
+
+/** 清理冰箱：相同食材但无法连线消除。 */
+export function playMatchFail(): void {
+    playSfx('match_fail');
 }
 
 /** 冰箱格封门合上（容量凑满关门动画）。 */

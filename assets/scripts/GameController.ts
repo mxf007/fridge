@@ -38,6 +38,7 @@ import {
     playBtnClick,
     playFridgeDrop,
     playSfx,
+    playWrongKind,
     playTrayDoorClose,
     playTrayDoorVibration,
     preloadSfx,
@@ -52,6 +53,8 @@ import { BulkPurchaseState } from './bulk/BulkPurchaseState';
 import type { BulkRunDef } from './bulk/types';
 import { bulkPrototypeIndex, loadBulkPrototype, nextBulkRunId, validateBulkPrototype } from './bulk/prototypeRuns';
 import { openMergeGame } from './merge/MergeGameController';
+import { bindMatchGm } from './match/MatchGm';
+import { openMatchGame } from './match/MatchGameController';
 import {
     installWechatShareMenu,
     prefetchShareScreenshot,
@@ -118,6 +121,7 @@ const BAG_TOP_LIMIT = 8;
 const DESIGN_W = 720;
 const DESIGN_H = 1280;
 const BULK_PURCHASE_HOME_BTN = 'BulkPurchaseHomeBtn';
+const MATCH_HOME_BTN = 'MatchHomeBtn';
 /** buffer_board.png 720×220 上三格奶油盘：中心相对木板中心（Y 向上）。 */
 const BUF_BOARD_W = 720;
 const BUF_BOARD_H = 220;
@@ -221,6 +225,8 @@ const UUID = {
 };
 
 const HOME_NODES = ['Bg', 'BxTitle', 'HomeSubTitle', 'GameList', 'BtnSettings'];
+/** 仅主页显示的节点（子玩法全屏时一并隐藏）。 */
+const HOME_ONLY_NODES = ['AlbumLink'];
 const HOME_SETTINGS_X = -268;
 const HOME_SETTINGS_Y = 538;
 const SETTINGS_BTN_W = 96;
@@ -447,6 +453,7 @@ export class GameController extends Component {
     private albumCellCache: { [key: string]: { x: number; y: number; w: number; h: number; horizontal: boolean }[] } = {};
     private albumToken = 0;
     private enteringLevel = false;
+    private matchHomeFoodReadyRequested = false;
     /** 控制台 gm(关卡号) 指定后，开始收拾进这一关。不改通关进度。 */
     private gmLevelId: number | null = null;
 
@@ -454,6 +461,7 @@ export class GameController extends Component {
         // 自检含可见信息审计，同步跑会把预览进度条卡住。用 tools/run_level_selfchecks_19_30.ts。
         installWechatShareMenu();
         this.bindGm();
+        bindMatchGm();
         this.bindHome();
         this.fitHomeBackground();
         this.refreshAlbumLink();
@@ -518,15 +526,7 @@ export class GameController extends Component {
                 this.openAlbum();
             }, this);
         }
-        const matchBtn = this.node.getChildByName('GameList')?.getChildByName('ModeMatchBtn');
-        if (matchBtn) {
-            if (!matchBtn.getComponent(Button)) matchBtn.addComponent(Button);
-            matchBtn.off(Node.EventType.TOUCH_END);
-            matchBtn.on(Node.EventType.TOUCH_END, () => {
-                playBtnClick();
-                this.openAlbum();
-            }, this);
-        }
+        this.bindMatchHomeEntry();
         const settingsBtn = this.node.getChildByName('BtnSettings');
         if (settingsBtn) {
             this.bindHudPress(settingsBtn, () => {
@@ -542,15 +542,9 @@ export class GameController extends Component {
             merge.on(Node.EventType.TOUCH_END, () => {
                 playBtnClick();
                 this.closeSettingsLayer();
-                for (let i = 0; i < HOME_NODES.length; i++) {
-                    const homeNode = this.node.getChildByName(HOME_NODES[i]);
-                    if (homeNode) homeNode.active = false;
-                }
+                this.setHomeChromeVisible(false);
                 openMergeGame(this.node, () => {
-                    for (let i = 0; i < HOME_NODES.length; i++) {
-                        const homeNode = this.node.getChildByName(HOME_NODES[i]);
-                        if (homeNode) homeNode.active = true;
-                    }
+                    this.setHomeChromeVisible(true);
                     this.polishHomeChrome();
                     this.refreshAlbumLink();
                 });
@@ -663,8 +657,6 @@ export class GameController extends Component {
                 }
             }
         }
-        const album = this.node.getChildByName('AlbumLink');
-        if (album) album.active = false;
         const mask = this.node.getChildByName('HomeBarMask');
         if (mask) mask.active = false;
         const settingsBtn = this.node.getChildByName('BtnSettings');
@@ -677,7 +669,87 @@ export class GameController extends Component {
         if (gameList) gameList.active = true;
         this.closeSettingsLayer();
         this.closeBulkPurchaseLayer();
+        this.ensureMatchHomeEntry();
+        this.polishMatchHomeEntry();
         this.refreshBulkHomeEntry();
+        this.layoutHomeAlbumLink();
+        this.refreshAlbumLink();
+    }
+
+    private setHomeChromeVisible(visible: boolean): void {
+        const names = [...HOME_NODES, ...HOME_ONLY_NODES];
+        for (let i = 0; i < names.length; i++) {
+            const homeNode = this.node.getChildByName(names[i]);
+            if (homeNode) homeNode.active = visible;
+        }
+    }
+
+    private openMatchModeFromHome(): void {
+        playBtnClick();
+        this.closeSettingsLayer();
+        this.setHomeChromeVisible(false);
+        openMatchGame(this.node, () => {
+            this.setHomeChromeVisible(true);
+            this.polishHomeChrome();
+            this.refreshAlbumLink();
+        });
+    }
+
+    private matchHomeEntry(): Node | null {
+        const list = this.node.getChildByName('GameList');
+        if (!list) return null;
+        return list.getChildByName(MATCH_HOME_BTN);
+    }
+
+    /** 场景 GameList/MatchHomeBtn；须在编辑器里维护，不再运行时克隆。 */
+    private ensureMatchHomeEntry(): Node | null {
+        const list = this.node.getChildByName('GameList');
+        if (!list) return null;
+        const entry = list.getChildByName(MATCH_HOME_BTN);
+        if (entry?.isValid) return entry;
+        if (EDITOR) {
+            console.warn('[home] 请在 GameScene/GameList 下添加 MatchHomeBtn（放在 BulkPurchaseHomeBtn 下方）');
+        }
+        return null;
+    }
+
+    private bindMatchHomeEntry(): void {
+        const matchBtn = this.ensureMatchHomeEntry();
+        if (!matchBtn) return;
+        if (!matchBtn.getComponent(Button)) matchBtn.addComponent(Button);
+        matchBtn.off(Node.EventType.TOUCH_END);
+        matchBtn.on(Node.EventType.TOUCH_END, () => this.openMatchModeFromHome(), this);
+    }
+
+    /** 布局与文案以 GameScene/MatchHomeBtn 为准；运行时只补 Icon 下食材图资源。 */
+    private polishMatchHomeEntry(): void {
+        const entry = this.matchHomeEntry() ?? this.ensureMatchHomeEntry();
+        if (!entry) return;
+        entry.active = true;
+        this.applyMatchHomeIconFrames(entry);
+    }
+
+    private applyMatchHomeIconFrames(entry: Node): void {
+        const icon = entry.getChildByName('Icon');
+        if (!icon) return;
+        const bindFrame = (childName: string, frame: SpriteFrame | null) => {
+            const node = icon.getChildByName(childName);
+            if (!node) return;
+            const sprite = node.getComponent(Sprite);
+            if (sprite && frame) {
+                sprite.spriteFrame = frame;
+                sprite.sizeMode = Sprite.SizeMode.CUSTOM;
+            }
+            node.active = !!frame || node.active;
+        };
+        bindFrame('MatchMilk', this.foodMilk);
+        bindFrame('MatchVeg', this.foodVeg);
+        if ((!this.foodMilk || !this.foodVeg) && !this.matchHomeFoodReadyRequested) {
+            this.matchHomeFoodReadyRequested = true;
+            void this.ensureFoodFrames().then(() => {
+                if (entry.isValid) this.applyMatchHomeIconFrames(entry);
+            });
+        }
     }
 
     private closeSettingsLayer(): void {
@@ -3069,13 +3141,50 @@ export class GameController extends Component {
         g.fill();
     }
 
+    /** 图鉴文字链放在模式列表最下一项下方，避免被卡片挡住。 */
+    private layoutHomeAlbumLink(): void {
+        const link = this.node.getChildByName('AlbumLink');
+        const list = this.node.getChildByName('GameList');
+        if (!link || !list) return;
+        link.active = true;
+        link.layer = UI_2D;
+        const ui = link.getComponent(UITransform) ?? link.addComponent(UITransform);
+        ui.setContentSize(440, 64);
+        const anchor = this.homeListBottomEntry();
+        let y = -548;
+        if (anchor) {
+            const cardHalf = (anchor.getComponent(UITransform)?.contentSize.height ?? 168) / 2;
+            y = list.position.y + anchor.position.y - cardHalf - 40;
+        }
+        link.setPosition(0, y, 0);
+        link.setSiblingIndex(this.node.children.length - 1);
+        if (!link.getComponent(Button)) link.addComponent(Button);
+    }
+
+    private homeListBottomEntry(): Node | null {
+        return this.matchHomeEntry()
+            ?? this.bulkPurchaseHomeEntry()
+            ?? this.node.getChildByName('GameList')?.getChildByName('ModeVegMergeBtn')
+            ?? null;
+    }
+
     private refreshAlbumLink() {
         const link = this.node.getChildByName('AlbumLink');
         if (!link) return;
+        link.active = true;
+        this.layoutHomeAlbumLink();
         const label = link.getChildByName('Label')?.getComponent(Label)
             || link.getComponent(Label)
             || link.getComponentInChildren(Label);
-        if (label && label.enabled) label.string = `我收过的冰箱  ${this.clearedId()}/${PLAYABLE.length}`;
+        if (!label) return;
+        label.enabled = true;
+        label.string = `我收过的冰箱  ${this.clearedId()}/${PLAYABLE.length}  ›`;
+        label.fontSize = 30;
+        label.lineHeight = 40;
+        label.color = Color.BLACK;
+        label.fontFamily = 'Microsoft YaHei';
+        label.isBold = true;
+        label.horizontalAlign = Label.HorizontalAlign.CENTER;
     }
 
     /** 先出面板。食材图齐了再填看得见的卡片，槽位内容用存档里的种类。 */
@@ -3894,10 +4003,7 @@ export class GameController extends Component {
         this.clearFoodPress();
         this.clearFridgeFlights();
         this.closeSettingsLayer();
-        for (let i = 0; i < HOME_NODES.length; i++) {
-            const n = this.node.getChildByName(HOME_NODES[i]);
-            if (n) n.active = false;
-        }
+        this.setHomeChromeVisible(false);
         this.board = BoardState.fromLevel(level);
         this.busy = false;
         this.levelFailed = false;
@@ -4249,11 +4355,7 @@ export class GameController extends Component {
             this.playRoot.destroyAllChildren();
             this.playRoot.active = false;
         }
-        for (let i = 0; i < HOME_NODES.length; i++) {
-            const n = this.node.getChildByName(HOME_NODES[i]);
-            if (!n) continue;
-            n.active = true;
-        }
+        this.setHomeChromeVisible(true);
         this.refreshAlbumLink();
         this.polishHomeChrome();
         setSharePayload({ title: '今晚冰箱，来一起收一层' });
@@ -7482,7 +7584,11 @@ export class GameController extends Component {
         const id = this.board ? this.board.level.id : 0;
         const teachSwitch = result.reason === 'wrong_kind' && (id === 4 || id === 7) && this.firstKindToast;
         const sizeFail = this.mixedCaps() && result.reason === 'dest_full';
-        if (!sizeFail) this.showToast(this.toastFor(result));
+        if (!sizeFail) {
+            const text = this.toastFor(result);
+            this.showToast(text);
+            if (text.indexOf('这格只收') === 0) playWrongKind();
+        }
         this.flashTrays(result.hintTrays);
         this.flashBuffers(result.hintBuffers);
         if (teachSwitch) {

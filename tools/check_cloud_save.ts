@@ -21,8 +21,12 @@ function memoryKv(): AlbumKv {
 function file(partial: Partial<ProgressFile> & { entries?: ProgressFile['album']['entries'] }): ProgressFile {
     const base = emptyProgress();
     return {
+        ...base,
         cleared: partial.cleared != null ? partial.cleared : base.cleared,
+        bulkRunId: partial.bulkRunId != null ? partial.bulkRunId : base.bulkRunId,
         milestones: partial.milestones ? partial.milestones : base.milestones,
+        mergeBestScore: partial.mergeBestScore != null ? partial.mergeBestScore : base.mergeBestScore,
+        match: partial.match ? partial.match : base.match,
         album: { entries: partial.entries ? partial.entries : {} },
     };
 }
@@ -85,5 +89,26 @@ const round = readProgress(kv);
 if (round.cleared !== 10 || round.milestones[10] !== true) throw new Error('roundtrip flags');
 if (readAlbum(kv).entries['1'].kinds[0] !== 'fruit') throw new Error('roundtrip album');
 if (canonProgress(round) !== canonProgress(merged)) throw new Error('canon drifted');
+
+const matchLocal = emptyProgress();
+matchLocal.match = {
+    ...matchLocal.match,
+    unlockedLevelId: 5,
+    currentLevelId: 5,
+    clearedLevelIds: [1, 2, 3, 4],
+    badgeIds: [],
+};
+const matchRemote = emptyProgress();
+matchRemote.match = {
+    ...matchRemote.match,
+    unlockedLevelId: 8,
+    currentLevelId: 7,
+    clearedLevelIds: [1, 2, 3, 4, 5, 6, 7],
+    badgeIds: ['match_badge_10'],
+};
+const matchMerged = mergeProgress(matchLocal, matchRemote);
+if (matchMerged.match.unlockedLevelId !== 8) throw new Error('match unlocked merge');
+if (matchMerged.match.clearedLevelIds.join(',') !== '1,2,3,4,5,6,7') throw new Error('match cleared merge');
+if (matchMerged.match.badgeIds.join(',') !== 'match_badge_10') throw new Error('match badge merge');
 
 console.log('cloud save ok');

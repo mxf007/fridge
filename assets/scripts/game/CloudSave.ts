@@ -2,13 +2,21 @@
  * 今晚冰箱进度的云端文档。一条记录一个玩家（云开发按 _openid 隔离）。
  *
  * 集合名 saves。控制台权限用「仅创建者可读写」。
- * 字段：cleared、album（首通步数、最佳步数、首通格子种类）、milestones、mergeBestScore。
+ * 字段：cleared、album、milestones、mergeBestScore、bulkRunId、match（配对模式解锁/通关/徽章）。
  * 本机先写。云端回来后取更高关卡、更少步数；空云档不覆盖本机。
  * 音效、震动、大果盘残局不进这份文档。
  */
 import { readAlbum, writeAlbum } from './AlbumState';
 import type { AlbumEntry, AlbumFile, AlbumGrade, AlbumKv } from './AlbumState';
 import { readMergeBest, writeMergeBest } from '../merge/MergeSave';
+import { MATCH_LEVEL_IDS } from '../match/MatchLevels';
+import {
+    matchProgressFromCloud,
+    mergeMatchProgress,
+    readMatchProgress,
+    writeMatchProgress,
+    type MatchProgress,
+} from '../match/MatchSave';
 import { CLOUD_ENV_ID } from './cloudEnv';
 import type { FoodId } from './types';
 import { FOOD_IDS } from './types';
@@ -28,6 +36,7 @@ export type ProgressFile = {
     album: AlbumFile;
     milestones: MilestoneFlags;
     mergeBestScore: number;
+    match: MatchProgress;
 };
 
 type CloudDoc = Record<string, unknown> & { _id?: string };
@@ -78,8 +87,14 @@ export function emptyProgress(): ProgressFile {
         album: { entries: {} },
         milestones: { 10: false, 20: false, 30: false },
         mergeBestScore: 0,
+        match: readMatchProgress(emptyKv(), MATCH_LEVEL_IDS),
     };
 }
+
+const emptyKv = (): AlbumKv => ({
+    getItem: () => null,
+    setItem: () => {},
+});
 
 export function readProgress(kv: AlbumKv): ProgressFile {
     const raw = kv.getItem(CLEARED_KEY);
@@ -91,7 +106,14 @@ export function readProgress(kv: AlbumKv): ProgressFile {
         const n = MILESTONE_NS[i];
         milestones[n] = kv.getItem(milestoneKey(n)) === '1';
     }
-    return { cleared, bulkRunId, album: readAlbum(kv), milestones, mergeBestScore: readMergeBest(kv) };
+    return {
+        cleared,
+        bulkRunId,
+        album: readAlbum(kv),
+        milestones,
+        mergeBestScore: readMergeBest(kv),
+        match: readMatchProgress(kv, MATCH_LEVEL_IDS),
+    };
 }
 
 export function writeProgress(kv: AlbumKv, file: ProgressFile): void {
@@ -99,6 +121,7 @@ export function writeProgress(kv: AlbumKv, file: ProgressFile): void {
     kv.setItem(BULK_RUN_ID_KEY, sanitizeBulkRunId(file.bulkRunId));
     writeAlbum(kv, file.album);
     writeMergeBest(kv, file.mergeBestScore);
+    writeMatchProgress(kv, file.match, MATCH_LEVEL_IDS);
     for (let i = 0; i < MILESTONE_NS.length; i++) {
         const n = MILESTONE_NS[i];
         if (file.milestones[n]) kv.setItem(milestoneKey(n), '1');
@@ -115,6 +138,7 @@ export function progressFromCloud(data: unknown): ProgressFile | null {
         album: albumFromCloud(src.album),
         milestones: flagsFromCloud(src.milestones),
         mergeBestScore: clampMergeBestScore(src.mergeBestScore),
+        match: matchProgressFromCloud(src.match, MATCH_LEVEL_IDS),
     };
 }
 
@@ -146,6 +170,7 @@ export function mergeProgress(local: ProgressFile, remote: ProgressFile): Progre
             30: local.milestones[30] || remote.milestones[30],
         },
         mergeBestScore: Math.max(local.mergeBestScore, remote.mergeBestScore),
+        match: mergeMatchProgress(local.match, remote.match, MATCH_LEVEL_IDS),
     };
 }
 
@@ -170,6 +195,12 @@ export function canonProgress(file: ProgressFile): string {
             30: !!file.milestones[30],
         },
         mergeBestScore: clampMergeBestScore(file.mergeBestScore),
+        match: {
+            unlockedLevelId: file.match.unlockedLevelId,
+            currentLevelId: file.match.currentLevelId,
+            clearedLevelIds: file.match.clearedLevelIds.slice(),
+            badgeIds: file.match.badgeIds.slice(),
+        },
         entries,
     });
 }
@@ -296,6 +327,12 @@ function cloudBody(file: ProgressFile): Record<string, unknown> {
             entries: file.album.entries,
         },
         mergeBestScore: clampMergeBestScore(file.mergeBestScore),
+        match: {
+            unlockedLevelId: file.match.unlockedLevelId,
+            currentLevelId: file.match.currentLevelId,
+            clearedLevelIds: file.match.clearedLevelIds,
+            badgeIds: file.match.badgeIds,
+        },
         updatedAt: Date.now(),
     };
 }
